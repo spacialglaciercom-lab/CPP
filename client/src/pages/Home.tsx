@@ -578,6 +578,39 @@ export default function Home() {
                   </p>
                 </div>
               </div>
+
+              {/* Turn Statistics */}
+              <div className="mt-4 pt-3 border-t border-border/30">
+                <p className="text-xs text-muted-foreground mb-2">Turn Statistics</p>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/30">
+                    <p className="text-[10px] text-emerald-400 uppercase">Right</p>
+                    <p className="font-mono text-lg text-emerald-400">
+                      {result.stats.rightTurnCount}
+                    </p>
+                  </div>
+                  <div className="bg-amber-500/10 rounded-lg p-2 border border-amber-500/30">
+                    <p className="text-[10px] text-amber-400 uppercase">Left</p>
+                    <p className="font-mono text-lg text-amber-400">
+                      {result.stats.leftTurnCount}
+                    </p>
+                  </div>
+                  <div className={`rounded-lg p-2 border ${
+                    result.stats.uTurnCount === 0 
+                      ? 'bg-emerald-500/10 border-emerald-500/30' 
+                      : 'bg-red-500/10 border-red-500/30'
+                  }`}>
+                    <p className={`text-[10px] uppercase ${
+                      result.stats.uTurnCount === 0 ? 'text-emerald-400' : 'text-red-400'
+                    }`}>U-Turns</p>
+                    <p className={`font-mono text-lg ${
+                      result.stats.uTurnCount === 0 ? 'text-emerald-400' : 'text-red-400'
+                    }`}>
+                      {result.stats.uTurnCount}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

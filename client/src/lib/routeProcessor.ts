@@ -39,6 +39,9 @@ export interface RouteStats {
   connectedComponents: number;
   includedWays: number;
   excludedWays: number;
+  uTurnCount: number;
+  rightTurnCount: number;
+  leftTurnCount: number;
 }
 
 export interface ProcessingLog {
@@ -372,6 +375,58 @@ function findCentroidNode(graph: Graph): number {
   return closestNode;
 }
 
+/**
+ * Calculate turn score with U-turn penalty
+ * Lower score = preferred turn
+ * 
+ * Turn categories:
+ * - Straight (0°): score 0-20
+ * - Slight right (1-45°): score 20-65  
+ * - Right (46-90°): score 65-110
+ * - Sharp right (91-135°): score 110-155
+ * - Slight left (-1 to -45°): score 160-205
+ * - Left (-46 to -90°): score 205-250
+ * - Sharp left (-91 to -135°): score 250-295
+ * - U-turn (±136-180°): score 500+ (heavy penalty)
+ */
+function calculateTurnScore(incomingBearing: number, outgoingBearing: number): number {
+  // Calculate turn angle: positive = right, negative = left
+  let turnAngle = outgoingBearing - incomingBearing;
+  
+  // Normalize to -180 to 180 range
+  while (turnAngle > 180) turnAngle -= 360;
+  while (turnAngle < -180) turnAngle += 360;
+  
+  const absTurn = Math.abs(turnAngle);
+  
+  // U-turn detection: turns greater than 150° get heavy penalty
+  if (absTurn > 150) {
+    // U-turn penalty: base 500 + how close to 180°
+    return 500 + (absTurn - 150);
+  }
+  
+  // Prefer going straight or slight turns
+  if (absTurn <= 20) {
+    // Straight ahead: best score
+    return absTurn;
+  }
+  
+  // Right turns preferred over left turns
+  if (turnAngle > 0) {
+    // Right turn: score based on angle magnitude
+    // Slight right (1-45°): 20-65
+    // Right (46-90°): 65-110
+    // Sharp right (91-150°): 110-200
+    return 20 + turnAngle;
+  } else {
+    // Left turn: add 140 penalty to prefer rights
+    // Slight left: 160-205
+    // Left: 205-250
+    // Sharp left: 250-290
+    return 160 + absTurn;
+  }
+}
+
 function hierholzerWithTurnPreference(
   graph: Graph, 
   startNode: number
@@ -396,17 +451,17 @@ function hierholzerWithTurnPreference(
       let selectedEdge: { to: number; key: number; data: GraphEdge };
 
       if (incomingBearing !== null && edges.length > 1) {
-        // Sort by turn angle preference (prefer right turns)
+        // Score each edge by turn preference with U-turn penalty
         const edgesWithScore = edges.map(edge => {
-          const outgoingBearing = edge.data.bearing;
-          let turnAngle = ((outgoingBearing - incomingBearing + 180) % 360) - 180;
-          // Prefer small positive angles (right turns)
-          const score = turnAngle >= 0 ? turnAngle : 360 + turnAngle;
+          const score = calculateTurnScore(incomingBearing, edge.data.bearing);
           return { edge, score };
         });
+        
+        // Sort by score (lower = better)
         edgesWithScore.sort((a, b) => a.score - b.score);
         selectedEdge = edgesWithScore[0].edge;
       } else {
+        // No incoming bearing or only one choice - just take first available
         selectedEdge = edges[0];
       }
 
@@ -471,6 +526,10 @@ function calculateRouteStats(
 ): RouteStats {
   let totalDistance = 0;
   let traversals = 0;
+  let uTurnCount = 0;
+  let rightTurnCount = 0;
+  let leftTurnCount = 0;
+  let prevBearing: number | null = null;
 
   for (let i = 0; i < circuit.length - 1; i++) {
     const u = circuit[i];
@@ -480,6 +539,26 @@ function calculateRouteStats(
     if (edge) {
       totalDistance += edge.data.length;
       traversals++;
+      
+      // Count turn types
+      if (prevBearing !== null) {
+        let turnAngle = edge.data.bearing - prevBearing;
+        while (turnAngle > 180) turnAngle -= 360;
+        while (turnAngle < -180) turnAngle += 360;
+        
+        const absTurn = Math.abs(turnAngle);
+        
+        if (absTurn > 150) {
+          uTurnCount++;
+        } else if (turnAngle > 20) {
+          rightTurnCount++;
+        } else if (turnAngle < -20) {
+          leftTurnCount++;
+        }
+        // Straight ahead (within ±20°) not counted as a turn
+      }
+      
+      prevBearing = edge.data.bearing;
     }
   }
 
@@ -494,7 +573,10 @@ function calculateRouteStats(
     edgeCount: graph.edgeCount,
     connectedComponents: componentCount,
     includedWays,
-    excludedWays
+    excludedWays,
+    uTurnCount,
+    rightTurnCount,
+    leftTurnCount
   };
 }
 
@@ -588,6 +670,12 @@ export async function processRoute(
 
   log(`Total distance: ${stats.totalDistanceKm.toFixed(2)} km`, 'info');
   log(`Estimated drive time: ${stats.driveTimeMin.toFixed(1)} minutes (at 15 km/h)`, 'info');
+  log(`Turn statistics: ${stats.rightTurnCount} right, ${stats.leftTurnCount} left, ${stats.uTurnCount} U-turns`, 'info');
+  if (stats.uTurnCount > 0) {
+    log(`Note: ${stats.uTurnCount} U-turns were unavoidable due to network topology`, 'warning');
+  } else {
+    log('No U-turns in the route!', 'success');
+  }
   log('Route generation complete!', 'success');
 
   // Extract coordinates for map display
