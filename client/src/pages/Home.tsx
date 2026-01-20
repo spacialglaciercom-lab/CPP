@@ -40,10 +40,16 @@ import {
   ProcessingLog,
   RouteResult,
   StartPoint,
+  TurnPenaltyConfig,
 } from "@/lib/routeProcessor";
+import { useTurnPenalties } from "@/contexts/TurnPenaltiesContext";
 import RouteMap from "@/components/RouteMap";
+import TurnPenaltiesConfig from "@/components/TurnPenaltiesConfig";
 
 export default function Home() {
+  // Get turn penalties from context
+  const { penalties } = useTurnPenalties();
+
   // File state
   const [file, setFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
@@ -168,7 +174,8 @@ export default function Home() {
           setLogs((prev) => [...prev, log]);
           setProgress((prev) => Math.min(prev + 8, 95));
         },
-        customStart
+        customStart,
+        penalties as TurnPenaltyConfig
       );
 
       setProgress(100);
@@ -430,6 +437,9 @@ export default function Home() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Turn Penalties Configuration */}
+              <TurnPenaltiesConfig />
 
               {/* Actions */}
               <div className="space-y-2">

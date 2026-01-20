@@ -375,21 +375,28 @@ function findCentroidNode(graph: Graph): number {
   return closestNode;
 }
 
+export interface TurnPenaltyConfig {
+  straight: number;      // 0-100, default 0
+  rightTurn: number;     // 0-200, default 10
+  leftTurn: number;      // 0-500, default 50
+  uTurn: number;         // 0-1000, default 500
+}
+
 /**
- * Calculate turn score with U-turn penalty
+ * Calculate turn score with configurable penalties
  * Lower score = preferred turn
  * 
  * Turn categories:
- * - Straight (0°): score 0-20
- * - Slight right (1-45°): score 20-65  
- * - Right (46-90°): score 65-110
- * - Sharp right (91-135°): score 110-155
- * - Slight left (-1 to -45°): score 160-205
- * - Left (-46 to -90°): score 205-250
- * - Sharp left (-91 to -135°): score 250-295
- * - U-turn (±136-180°): score 500+ (heavy penalty)
+ * - Straight (0°): score 0 + straightPenalty
+ * - Slight right (1-45°): score 20 + rightTurnPenalty
+ * - Right (46-90°): score 65 + rightTurnPenalty
+ * - Sharp right (91-135°): score 110 + rightTurnPenalty
+ * - Slight left (-1 to -45°): score 160 + leftTurnPenalty
+ * - Left (-46 to -90°): score 205 + leftTurnPenalty
+ * - Sharp left (-91 to -135°): score 250 + leftTurnPenalty
+ * - U-turn (±136-180°): score 500+ + uTurnPenalty (heavy penalty)
  */
-function calculateTurnScore(incomingBearing: number, outgoingBearing: number): number {
+function calculateTurnScore(incomingBearing: number, outgoingBearing: number, penalties: TurnPenaltyConfig): number {
   // Calculate turn angle: positive = right, negative = left
   let turnAngle = outgoingBearing - incomingBearing;
   
@@ -399,37 +406,32 @@ function calculateTurnScore(incomingBearing: number, outgoingBearing: number): n
   
   const absTurn = Math.abs(turnAngle);
   
-  // U-turn detection: turns greater than 150° get heavy penalty
+  // U-turn detection: turns greater than 150 degrees get heavy penalty
   if (absTurn > 150) {
-    // U-turn penalty: base 500 + how close to 180°
-    return 500 + (absTurn - 150);
+    // U-turn penalty: base 500 + how close to 180 degrees + configurable penalty
+    return 500 + (absTurn - 150) + penalties.uTurn;
   }
   
   // Prefer going straight or slight turns
   if (absTurn <= 20) {
-    // Straight ahead: best score
-    return absTurn;
+    // Straight ahead: best score + configurable penalty
+    return absTurn + penalties.straight;
   }
   
   // Right turns preferred over left turns
   if (turnAngle > 0) {
-    // Right turn: score based on angle magnitude
-    // Slight right (1-45°): 20-65
-    // Right (46-90°): 65-110
-    // Sharp right (91-150°): 110-200
-    return 20 + turnAngle;
+    // Right turn: score based on angle magnitude + configurable penalty
+    return 20 + turnAngle + penalties.rightTurn;
   } else {
-    // Left turn: add 140 penalty to prefer rights
-    // Slight left: 160-205
-    // Left: 205-250
-    // Sharp left: 250-290
-    return 160 + absTurn;
+    // Left turn: add 140 penalty to prefer rights + configurable penalty
+    return 160 + absTurn + penalties.leftTurn;
   }
 }
 
 function hierholzerWithTurnPreference(
   graph: Graph, 
-  startNode: number
+  startNode: number,
+  penalties: TurnPenaltyConfig
 ): number[] {
   // Create working copy of edges
   const remainingEdges = new Map<number, Array<{ to: number; key: number; data: GraphEdge }>>();
@@ -451,9 +453,9 @@ function hierholzerWithTurnPreference(
       let selectedEdge: { to: number; key: number; data: GraphEdge };
 
       if (incomingBearing !== null && edges.length > 1) {
-        // Score each edge by turn preference with U-turn penalty
+        // Score each edge by turn preference with configurable penalties
         const edgesWithScore = edges.map(edge => {
-          const score = calculateTurnScore(incomingBearing, edge.data.bearing);
+          const score = calculateTurnScore(incomingBearing, edge.data.bearing, penalties);
           return { edge, score };
         });
         
@@ -590,8 +592,16 @@ export async function processRoute(
   filename: string,
   ignoreOneways: boolean,
   onLog: (log: ProcessingLog) => void,
-  customStartPoint?: StartPoint | null
+  customStartPoint?: StartPoint | null,
+  penalties?: TurnPenaltyConfig
 ): Promise<RouteResult> {
+  // Use default penalties if not provided
+  const activePenalties: TurnPenaltyConfig = penalties || {
+    straight: 0,
+    rightTurn: 10,
+    leftTurn: 50,
+    uTurn: 500,
+  };
   const logs: ProcessingLog[] = [];
   const log = (message: string, type: ProcessingLog['type'] = 'info') => {
     const entry = createLog(message, type);
@@ -650,8 +660,9 @@ export async function processRoute(
 
   // Find Eulerian circuit
   log('Computing optimal route using Hierholzer algorithm...', 'info');
-  log('Applying right-turn preference for turn optimization...', 'info');
-  const circuit = hierholzerWithTurnPreference(subgraph, startNode);
+  log('Applying turn penalties for route optimization...', 'info');
+  log(`Turn penalties - Right: ${activePenalties.rightTurn}, Left: ${activePenalties.leftTurn}, U-turn: ${activePenalties.uTurn}`, 'info');
+  const circuit = hierholzerWithTurnPreference(subgraph, startNode, activePenalties);
   log(`Route computed: ${circuit.length} waypoints`, 'success');
 
   // Generate GPX
