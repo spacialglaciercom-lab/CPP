@@ -75,6 +75,7 @@ const EXCLUDE_ACCESS = new Set(['private', 'no']);
 const EXCLUDE_HIGHWAYS = new Set([
   'footway', 'cycleway', 'steps', 'path', 'pedestrian', 'track'
 ]);
+const EXCLUDE_DRIVEWAYS = new Set(['driveway']); // Additional driveway exclusion
 
 function createLog(message: string, type: ProcessingLog['type'] = 'info'): ProcessingLog {
   return { timestamp: new Date(), message, type };
@@ -155,6 +156,24 @@ export function filterWays(ways: OSMWay[]): { included: OSMWay[]; excluded: OSMW
 
   for (const way of ways) {
     const highway = way.tags.highway || '';
+    const service = way.tags.service || '';
+    const access = way.tags.access || '';
+    
+    // EXPLICIT DRIVEWAY EXCLUSION - Check multiple tags first
+    if (EXCLUDE_SERVICE.has(service)) {
+      excluded.push(way);
+      continue;
+    }
+    
+    if (EXCLUDE_DRIVEWAYS.has(highway)) {
+      excluded.push(way);
+      continue;
+    }
+    
+    if (EXCLUDE_ACCESS.has(access)) {
+      excluded.push(way);
+      continue;
+    }
     
     // Check if it's a driveable highway
     if (!INCLUDE_HIGHWAYS.has(highway)) {
@@ -162,19 +181,6 @@ export function filterWays(ways: OSMWay[]): { included: OSMWay[]; excluded: OSMW
         excluded.push(way);
         continue;
       }
-    }
-
-    // Check exclusions
-    const service = way.tags.service || '';
-    if (EXCLUDE_SERVICE.has(service)) {
-      excluded.push(way);
-      continue;
-    }
-
-    const access = way.tags.access || '';
-    if (EXCLUDE_ACCESS.has(access)) {
-      excluded.push(way);
-      continue;
     }
 
     included.push(way);
