@@ -43,8 +43,11 @@ import {
   TurnPenaltyConfig,
 } from "@/lib/routeProcessor";
 import { useTurnPenalties } from "@/contexts/TurnPenaltiesContext";
+import { detectUTurns, UTurnDetectionResult } from "@/lib/uTurnDetector";
 import RouteMap from "@/components/RouteMap";
+import LeafletMap from "@/components/LeafletMap";
 import TurnPenaltiesConfig from "@/components/TurnPenaltiesConfig";
+import UTurnDetectionPanel from "@/components/UTurnDetectionPanel";
 
 export default function Home() {
   // Get turn penalties from context
@@ -67,6 +70,8 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [logs, setLogs] = useState<ProcessingLog[]>([]);
   const [result, setResult] = useState<RouteResult | null>(null);
+  const [uTurnDetection, setUTurnDetection] = useState<UTurnDetectionResult | null>(null);
+  const [showUTurnAnalysis, setShowUTurnAnalysis] = useState(false);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -180,7 +185,22 @@ export default function Home() {
 
       setProgress(100);
       setResult(result);
-      toast.success("Route generated successfully!");
+      
+      // Run U-turn detection
+      try {
+        const uTurnResult = detectUTurns(fileContent);
+        setUTurnDetection(uTurnResult);
+        if (uTurnResult.totalCount > 0) {
+          setShowUTurnAnalysis(true);
+          toast.success(`Route generated! Found ${uTurnResult.totalCount} U-turn features.`);
+        } else {
+          toast.success("Route generated successfully!");
+        }
+      } catch (uTurnError) {
+        // U-turn detection is optional, don't fail the whole process
+        console.warn("U-turn detection failed:", uTurnError);
+        toast.success("Route generated successfully!");
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown error occurred";
@@ -493,9 +513,9 @@ export default function Home() {
             </div>
           )}
 
-          <RouteMap
-            coordinates={result?.coordinates || []}
-            bounds={result?.bounds}
+          <LeafletMap
+            route={result || undefined}
+            startPoint={useCustomStart && startLat && startLon ? { lat: parseFloat(startLat), lon: parseFloat(startLon) } : undefined}
           />
 
           {!result && !isProcessing && (
@@ -621,6 +641,13 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* U-Turn Detection Results */}
+          {uTurnDetection && showUTurnAnalysis && (
+            <div className="px-4 py-3 border-b border-border/50">
+              <UTurnDetectionPanel result={uTurnDetection} />
             </div>
           )}
 
