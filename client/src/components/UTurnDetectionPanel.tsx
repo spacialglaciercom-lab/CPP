@@ -80,73 +80,54 @@ export default function UTurnDetectionPanel({ result }: UTurnDetectionPanelProps
   };
 
   return (
-    <Card className="border-border/50 bg-card/50">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-display flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-amber-400" />
-          U-Turn Detection Analysis
-        </CardTitle>
-        <p className="text-xs text-muted-foreground/70 mt-1">
-          Identified restrictions and turning features in the OSM data
-        </p>
-      </CardHeader>
+    <div className="border-border/50 bg-card/50 rounded-lg border">
+      <div className="px-3 py-2 border-b border-border/30">
+        <h3 className="text-xs font-display flex items-center gap-2 text-foreground">
+          <AlertCircle className="w-3 h-3 text-amber-400" />
+          U-Turn Detection
+        </h3>
+      </div>
 
-      <CardContent className="space-y-4">
+      <div className="p-3 space-y-3 max-h-96 overflow-y-auto">
         {/* Summary Stats */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-            <p className="text-[10px] text-red-400/70 uppercase tracking-wider">
-              No U-Turn
-            </p>
-            <p className="text-lg font-display text-red-400">
-              {result.summary.noUTurnCount}
-            </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="bg-red-500/10 border border-red-500/30 rounded p-2">
+            <p className="text-[9px] text-red-400/70 uppercase tracking-wider">No U-Turn</p>
+            <p className="text-base font-display text-red-400">{result.summary.noUTurnCount}</p>
           </div>
-          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
-            <p className="text-[10px] text-emerald-400/70 uppercase tracking-wider">
-              Allow U-Turn
-            </p>
-            <p className="text-lg font-display text-emerald-400">
-              {result.summary.allowUTurnCount}
-            </p>
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded p-2">
+            <p className="text-[9px] text-emerald-400/70 uppercase tracking-wider">Allow U-Turn</p>
+            <p className="text-base font-display text-emerald-400">{result.summary.allowUTurnCount}</p>
           </div>
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-            <p className="text-[10px] text-blue-400/70 uppercase tracking-wider">
-              Turning Circles
-            </p>
-            <p className="text-lg font-display text-blue-400">
-              {result.summary.turningCircleCount}
-            </p>
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded p-2">
+            <p className="text-[9px] text-blue-400/70 uppercase tracking-wider">Circles</p>
+            <p className="text-base font-display text-blue-400">{result.summary.turningCircleCount}</p>
           </div>
-          <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3">
-            <p className="text-[10px] text-cyan-400/70 uppercase tracking-wider">
-              Turning Loops
-            </p>
-            <p className="text-lg font-display text-cyan-400">
-              {result.summary.turningLoopCount}
-            </p>
+          <div className="bg-cyan-500/10 border border-cyan-500/30 rounded p-2">
+            <p className="text-[9px] text-cyan-400/70 uppercase tracking-wider">Loops</p>
+            <p className="text-base font-display text-cyan-400">{result.summary.turningLoopCount}</p>
           </div>
         </div>
 
         {/* Tabs for Restrictions and Features */}
         <Tabs defaultValue="restrictions" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-background/50">
-            <TabsTrigger value="restrictions" className="text-xs">
+          <TabsList className="grid w-full grid-cols-2 bg-background/50 h-8">
+            <TabsTrigger value="restrictions" className="text-[11px] py-1">
               Restrictions ({result.restrictions.length})
             </TabsTrigger>
-            <TabsTrigger value="features" className="text-xs">
-              Turning Features ({result.turningFeatures.length})
+            <TabsTrigger value="features" className="text-[11px] py-1">
+              Features ({result.turningFeatures.length})
             </TabsTrigger>
           </TabsList>
 
           {/* Restrictions Tab */}
-          <TabsContent value="restrictions" className="space-y-2 mt-3">
+          <TabsContent value="restrictions" className="space-y-2 mt-2">
             {result.restrictions.length === 0 ? (
-              <p className="text-xs text-muted-foreground/70 text-center py-4">
-                No U-turn restrictions found
+              <p className="text-xs text-muted-foreground/70 text-center py-2">
+                No restrictions found
               </p>
             ) : (
-              <ScrollArea className="h-64 rounded-lg border border-border/30 bg-background/30 p-2">
+              <div className="h-40 rounded-lg border border-border/30 bg-background/30 p-2 overflow-y-auto">
                 <div className="space-y-2">
                   {result.restrictions.map((restriction) => (
                     <div
@@ -223,18 +204,18 @@ export default function UTurnDetectionPanel({ result }: UTurnDetectionPanelProps
                     </div>
                   ))}
                 </div>
-              </ScrollArea>
+              </div>
             )}
           </TabsContent>
 
           {/* Features Tab */}
-          <TabsContent value="features" className="space-y-2 mt-3">
+          <TabsContent value="features" className="space-y-2 mt-2">
             {result.turningFeatures.length === 0 ? (
-              <p className="text-xs text-muted-foreground/70 text-center py-4">
-                No turning circles or loops found
+              <p className="text-xs text-muted-foreground/70 text-center py-2">
+                No turning features found
               </p>
             ) : (
-              <ScrollArea className="h-64 rounded-lg border border-border/30 bg-background/30 p-2">
+              <div className="h-40 rounded-lg border border-border/30 bg-background/30 p-2 overflow-y-auto">
                 <div className="space-y-2">
                   {result.turningFeatures.map((feature) => (
                     <div
@@ -295,18 +276,18 @@ export default function UTurnDetectionPanel({ result }: UTurnDetectionPanelProps
                     </div>
                   ))}
                 </div>
-              </ScrollArea>
+              </div>
             )}
           </TabsContent>
         </Tabs>
 
         {/* Export Buttons */}
-        <div className="flex gap-2">
+        <div className="flex gap-1.5 pt-2">
           <Button
             onClick={handleExportJSON}
             variant="outline"
             size="sm"
-            className="flex-1 border-border/50 text-muted-foreground hover:text-foreground text-xs"
+            className="flex-1 border-border/50 text-muted-foreground hover:text-foreground text-[11px] h-7"
           >
             <Download className="w-3 h-3 mr-1" />
             JSON
@@ -315,13 +296,13 @@ export default function UTurnDetectionPanel({ result }: UTurnDetectionPanelProps
             onClick={handleExportCSV}
             variant="outline"
             size="sm"
-            className="flex-1 border-border/50 text-muted-foreground hover:text-foreground text-xs"
+            className="flex-1 border-border/50 text-muted-foreground hover:text-foreground text-[11px] h-7"
           >
             <Download className="w-3 h-3 mr-1" />
             CSV
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
