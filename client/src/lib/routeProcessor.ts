@@ -532,6 +532,7 @@ function calculateRouteStats(
   let rightTurnCount = 0;
   let leftTurnCount = 0;
   let prevBearing: number | null = null;
+  let lastCountedBearing: number | null = null;
 
   for (let i = 0; i < circuit.length - 1; i++) {
     const u = circuit[i];
@@ -542,9 +543,9 @@ function calculateRouteStats(
       totalDistance += edge.data.length;
       traversals++;
       
-      // Count turn types
-      if (prevBearing !== null) {
-        let turnAngle = edge.data.bearing - prevBearing;
+      // Count turn types only when bearing actually changes (at intersections)
+      if (lastCountedBearing !== null && edge.data.bearing !== prevBearing) {
+        let turnAngle = edge.data.bearing - lastCountedBearing;
         while (turnAngle > 180) turnAngle -= 360;
         while (turnAngle < -180) turnAngle += 360;
         
@@ -560,6 +561,10 @@ function calculateRouteStats(
         // Straight ahead (within ±20°) not counted as a turn
       }
       
+      // Update bearings: only count bearing change for turn statistics
+      if (prevBearing !== null && edge.data.bearing !== prevBearing) {
+        lastCountedBearing = prevBearing;
+      }
       prevBearing = edge.data.bearing;
     }
   }
