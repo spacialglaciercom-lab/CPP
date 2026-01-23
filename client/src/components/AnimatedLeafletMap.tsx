@@ -178,7 +178,7 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   return (
     <div className="w-full h-full flex flex-col bg-background/50 rounded-lg border border-border/30 overflow-hidden">
       {/* Map */}
-      <div ref={mapContainer} className="flex-1 w-full" />
+      <div ref={mapContainer} className="flex-1 w-full min-h-0" style={{ minHeight: '400px' }} />
 
       {/* Controls */}
       <div className="bg-card/80 border-t border-border/30 p-3 space-y-3">
