@@ -72,10 +72,7 @@ export default function LeafletMap({ route, startPoint }: LeafletMapProps) {
 
     // Display route if available
     if (route && route.coordinates.length > 0) {
-      const coordinates = route.coordinates.map((coord) => [
-        coord.lat,
-        coord.lon,
-      ] as [number, number]);
+      const coordinates = route.coordinates as [number, number][];
 
       // Draw route polyline
       routeLayer.current = L.polyline(coordinates, {

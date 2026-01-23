@@ -54,7 +54,8 @@ export interface RouteResult {
   gpxContent: string;
   stats: RouteStats;
   logs: ProcessingLog[];
-  coordinates: Array<{ lat: number; lon: number }>;
+  coordinates: Array<[number, number]>;
+  edgeSequence?: number[];
   bounds: {
     minLat: number;
     maxLat: number;
@@ -704,16 +705,16 @@ export async function processRoute(
   const coordinates = circuit
     .map(nodeId => subgraph.nodes.get(nodeId))
     .filter((node): node is OSMNode => node !== undefined)
-    .map(node => ({ lat: node.lat, lon: node.lon }));
+    .map(node => [node.lat, node.lon] as [number, number]);
 
   // Calculate bounds
   let minLat = Infinity, maxLat = -Infinity;
   let minLon = Infinity, maxLon = -Infinity;
   for (const coord of coordinates) {
-    minLat = Math.min(minLat, coord.lat);
-    maxLat = Math.max(maxLat, coord.lat);
-    minLon = Math.min(minLon, coord.lon);
-    maxLon = Math.max(maxLon, coord.lon);
+    minLat = Math.min(minLat, coord[0]);
+    maxLat = Math.max(maxLat, coord[0]);
+    minLon = Math.min(minLon, coord[1]);
+    maxLon = Math.max(maxLon, coord[1]);
   }
 
   return {
@@ -721,6 +722,7 @@ export async function processRoute(
     stats,
     logs,
     coordinates,
+    edgeSequence: undefined,
     bounds: { minLat, maxLat, minLon, maxLon }
   };
 }
