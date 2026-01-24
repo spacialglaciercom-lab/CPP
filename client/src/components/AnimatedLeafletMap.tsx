@@ -1,6 +1,7 @@
 /**
  * Animated Leaflet Map Component
- * Displays route with animated truck and blue/red line transitions
+ * Displays route with animated truck and playback controls
+ * Design: Command Center Interface with proper layout
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -16,6 +17,17 @@ interface AnimatedLeafletMapProps {
   route: RouteResult | null;
 }
 
+// Fix Leaflet icon issue in React
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+});
+
 export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -25,15 +37,27 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
   const [speed, setSpeed] = useState(1);
 
-  // Initialize map
+  // Initialize map once
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
-    map.current = L.map(mapContainer.current).setView([45.5, -73.6], 13);
+    map.current = L.map(mapContainer.current, {
+      center: [45.5017, -73.5673],
+      zoom: 13,
+      zoomControl: true,
+      attributionControl: true,
+    });
+
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '© OpenStreetMap contributors © CARTO',
-      maxZoom: 19,
+      subdomains: 'abcd',
+      maxZoom: 20,
     }).addTo(map.current);
+
+    // Trigger map resize after initialization
+    setTimeout(() => {
+      map.current?.invalidateSize();
+    }, 100);
 
     return () => {
       if (map.current) {
@@ -43,39 +67,50 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
     };
   }, []);
 
-  // Load route and create polyline
+  // Load route and setup animation
   useEffect(() => {
     if (!route || !map.current) return;
 
-    // Remove existing polyline
+    // Remove existing polyline and markers
     if (routePolyline.current) {
       routePolyline.current.remove();
       routePolyline.current = null;
     }
-
-    // Draw route as polyline
-    const coords = route.coordinates as [number, number][];
-    if (coords.length > 0) {
-      routePolyline.current = L.polyline(coords, {
-        color: '#00d9ff',
-        weight: 3,
-        opacity: 0.8,
-      }).addTo(map.current);
-
-      // Fit bounds
-      const bounds = L.latLngBounds(coords);
-      map.current.fitBounds(bounds, { padding: [50, 50] });
+    if (truckMarker.current) {
+      truckMarker.current.remove();
+      truckMarker.current = null;
     }
 
+    const coords = route.coordinates as [number, number][];
+    if (coords.length === 0) return;
+
+    // Draw route polyline
+    routePolyline.current = L.polyline(coords, {
+      color: '#00d9ff',
+      weight: 3,
+      opacity: 0.8,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map.current);
+
+    // Fit map to route bounds
+    const bounds = L.latLngBounds(coords);
+    map.current.fitBounds(bounds, { padding: [50, 50] });
+
+    // Invalidate size to ensure proper rendering
+    setTimeout(() => {
+      map.current?.invalidateSize();
+    }, 100);
+
     // Create coordinates for animator
-    const coordinates: RouteCoordinate[] = coords.map((coord, idx) => ({
+    const animCoords: RouteCoordinate[] = coords.map((coord, idx) => ({
       lat: coord[0],
       lon: coord[1],
       edgeKey: idx,
     }));
 
     // Create animator
-    animator.current = new RouteAnimator(coordinates, speed);
+    animator.current = new RouteAnimator(animCoords, speed);
 
     animator.current.setOnProgressUpdate((state) => {
       setAnimationState(state);
@@ -85,19 +120,16 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
         const truckIcon = L.divIcon({
           html: `<div style="width: 30px; height: 30px; background: #00d9ff; border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px #00d9ff;"><div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div></div>`,
           iconSize: [30, 30],
+          iconAnchor: [15, 15],
           className: 'truck-marker',
         });
         truckMarker.current = L.marker([state.truckLat, state.truckLon], {
           icon: truckIcon,
+          zIndexOffset: 1000,
         }).addTo(map.current!);
       } else {
         truckMarker.current.setLatLng([state.truckLat, state.truckLon]);
       }
-    });
-
-    animator.current.setOnEdgeComplete((edgeKey) => {
-      // For now, we'll keep the route blue throughout
-      // In a more complex implementation, we'd split the polyline
     });
   }, [route, speed]);
 
@@ -134,12 +166,12 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-background/50 rounded-lg border border-border/30 overflow-hidden">
-      {/* Map */}
-      <div ref={mapContainer} className="flex-1 w-full min-h-0" style={{ minHeight: '400px' }} />
+    <div className="w-full h-full flex flex-col bg-background rounded-lg border border-border/30 overflow-hidden">
+      {/* Map Container */}
+      <div ref={mapContainer} className="flex-1 w-full bg-background" style={{ minHeight: '0' }} />
 
-      {/* Controls */}
-      <div className="bg-card/80 border-t border-border/30 p-3 space-y-3">
+      {/* Controls Panel */}
+      <div className="bg-card/90 border-t border-border/30 p-4 space-y-3 flex-shrink-0">
         {/* Progress Bar */}
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-muted-foreground">
