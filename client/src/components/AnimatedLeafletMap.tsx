@@ -21,7 +21,7 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   const map = useRef<L.Map | null>(null);
   const animator = useRef<RouteAnimator | null>(null);
   const truckMarker = useRef<L.Marker | null>(null);
-  const routePolylines = useRef<Map<number, L.Polyline>>(new Map());
+  const routePolyline = useRef<L.Polyline | null>(null);
   const [animationState, setAnimationState] = useState<AnimationState | null>(null);
   const [speed, setSpeed] = useState(1);
 
@@ -43,71 +43,36 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
     };
   }, []);
 
-  // Load route and create polylines
+  // Load route and create polyline
   useEffect(() => {
     if (!route || !map.current) return;
 
-    // Clear existing polylines
-    routePolylines.current.forEach((polyline) => polyline.remove());
-    routePolylines.current.clear();
-
-    // Create polylines for each edge
-    const coordinates: RouteCoordinate[] = [];
-    const edgePolylines = new Map<number, { coords: [number, number][]; edgeKey: number }>();
-
-    route.coordinates.forEach((coord, idx) => {
-      coordinates.push({
-        lat: coord[0],
-        lon: coord[1],
-        edgeKey: route.edgeSequence?.[idx],
-      });
-    });
-
-    // Group coordinates by edge
-    let currentEdgeKey: number | undefined;
-    let currentEdgeCoords: [number, number][] = [];
-
-    route.coordinates.forEach((coord, idx) => {
-      const edgeKey = route.edgeSequence?.[idx];
-
-      if (edgeKey !== currentEdgeKey && currentEdgeCoords.length > 0) {
-        if (currentEdgeKey !== undefined) {
-          edgePolylines.set(currentEdgeKey, {
-            coords: currentEdgeCoords,
-            edgeKey: currentEdgeKey,
-          });
-        }
-        currentEdgeCoords = [];
-      }
-
-      currentEdgeCoords.push([coord[0], coord[1]]);
-      currentEdgeKey = edgeKey;
-    });
-
-    if (currentEdgeCoords.length > 0 && currentEdgeKey !== undefined) {
-      edgePolylines.set(currentEdgeKey, {
-        coords: currentEdgeCoords,
-        edgeKey: currentEdgeKey,
-      });
+    // Remove existing polyline
+    if (routePolyline.current) {
+      routePolyline.current.remove();
+      routePolyline.current = null;
     }
 
-    // Create polylines on map
-    edgePolylines.forEach(({ coords, edgeKey }) => {
-      const polyline = L.polyline(coords, {
+    // Draw route as polyline
+    const coords = route.coordinates as [number, number][];
+    if (coords.length > 0) {
+      routePolyline.current = L.polyline(coords, {
         color: '#00d9ff',
         weight: 3,
         opacity: 0.8,
-      }).addTo(map.current!);
+      }).addTo(map.current);
 
-      routePolylines.current.set(edgeKey, polyline);
-    });
-
-    // Fit bounds
-    const allCoords = route.coordinates.map((c) => [c[0], c[1]] as [number, number]);
-    if (allCoords.length > 0) {
-      const bounds = L.latLngBounds(allCoords);
+      // Fit bounds
+      const bounds = L.latLngBounds(coords);
       map.current.fitBounds(bounds, { padding: [50, 50] });
     }
+
+    // Create coordinates for animator
+    const coordinates: RouteCoordinate[] = coords.map((coord, idx) => ({
+      lat: coord[0],
+      lon: coord[1],
+      edgeKey: idx,
+    }));
 
     // Create animator
     animator.current = new RouteAnimator(coordinates, speed);
@@ -131,10 +96,8 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
     });
 
     animator.current.setOnEdgeComplete((edgeKey) => {
-      const polyline = routePolylines.current.get(edgeKey);
-      if (polyline) {
-        polyline.setStyle({ color: '#ff0000', opacity: 1 });
-      }
+      // For now, we'll keep the route blue throughout
+      // In a more complex implementation, we'd split the polyline
     });
   }, [route, speed]);
 
@@ -149,11 +112,6 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   const handleReset = () => {
     animator.current?.reset();
     setAnimationState(null);
-
-    // Reset all polylines to blue
-    routePolylines.current.forEach((polyline) => {
-      polyline.setStyle({ color: '#00d9ff', opacity: 0.8 });
-    });
 
     if (truckMarker.current) {
       truckMarker.current.remove();
