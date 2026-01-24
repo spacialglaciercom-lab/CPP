@@ -296,10 +296,10 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <div className="flex h-[calc(100vh-57px)]">
+      <div className="flex flex-1 h-[calc(100vh-57px)] overflow-hidden">
         {/* Left Sidebar - Controls */}
-        <aside className="w-80 border-r border-border/50 bg-sidebar flex flex-col">
-          <ScrollArea className="flex-1">
+        <aside className="w-80 border-r border-border/50 bg-sidebar flex flex-col overflow-hidden">
+          <ScrollArea className="flex-1 overflow-hidden">
             <div className="p-4 space-y-4">
               {/* File Upload */}
               <Card className="border-border/50 bg-card/50">
@@ -507,7 +507,7 @@ export default function Home() {
         </aside>
 
         {/* Center - Map */}
-        <main className="flex-1 relative">
+        <main className="flex-1 relative overflow-hidden">
           {isProcessing && (
             <div className="absolute top-4 left-4 right-4 z-10">
               <Progress value={progress} className="h-1" />
