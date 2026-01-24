@@ -46,7 +46,6 @@ import { useTurnPenalties } from "@/contexts/TurnPenaltiesContext";
 import { detectUTurns, UTurnDetectionResult } from "@/lib/uTurnDetector";
 import RouteMap from "@/components/RouteMap";
 import LeafletMap from "@/components/LeafletMap";
-import AnimatedLeafletMap from "@/components/AnimatedLeafletMap";
 import TurnPenaltiesConfig from "@/components/TurnPenaltiesConfig";
 import UTurnDetectionPanel from "@/components/UTurnDetectionPanel";
 
@@ -514,8 +513,9 @@ export default function Home() {
             </div>
           )}
 
-          <AnimatedLeafletMap
-            route={result || null}
+          <LeafletMap
+            route={result || undefined}
+            startPoint={useCustomStart && startLat && startLon ? { lat: parseFloat(startLat), lon: parseFloat(startLon) } : undefined}
           />
 
           {!result && !isProcessing && (
