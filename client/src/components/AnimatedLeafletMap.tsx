@@ -1,14 +1,12 @@
 /**
  * Animated Leaflet Map Component
  * Displays route with animated truck and playback controls
- * CRITICAL: Uses explicit width/height styling to fix invisible map issues
  */
 
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { RouteResult } from '@/lib/routeProcessor';
-import { RouteAnimator, RouteCoordinate, AnimationState } from '@/lib/routeAnimator';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Play, Pause, RotateCcw } from 'lucide-react';
@@ -17,90 +15,67 @@ interface AnimatedLeafletMapProps {
   route: RouteResult | null;
 }
 
-// Fix Leaflet icon issue in React
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-});
-
 export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<L.Map | null>(null);
-  const animator = useRef<RouteAnimator | null>(null);
-  const truckMarker = useRef<L.Marker | null>(null);
-  const routePolyline = useRef<L.Polyline | null>(null);
-  const [animationState, setAnimationState] = useState<AnimationState | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const polylineRef = useRef<L.Polyline | null>(null);
+  const markerRef = useRef<L.Marker | null>(null);
+  const animationRef = useRef<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [speed, setSpeed] = useState(1);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Initialize map once
+  // Initialize map
   useEffect(() => {
-    if (!mapContainer.current || map.current) return;
+    if (!containerRef.current || mapRef.current) return;
 
-    // CRITICAL: Set explicit dimensions on container
-    mapContainer.current.style.width = '100%';
-    mapContainer.current.style.height = '100%';
-
-    console.log('Initializing map container:', {
-      width: mapContainer.current.style.width,
-      height: mapContainer.current.style.height,
-      offsetWidth: mapContainer.current.offsetWidth,
-      offsetHeight: mapContainer.current.offsetHeight,
-    });
+    console.log('Initializing Leaflet map...');
 
     try {
-      map.current = L.map(mapContainer.current, {
-        center: [45.5017, -73.5673],
+      const map = L.map(containerRef.current, {
+        center: [45.5, -73.6],
         zoom: 13,
         zoomControl: true,
-        attributionControl: true,
       });
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap contributors © CARTO',
-        subdomains: 'abcd',
+        attribution: '© OpenStreetMap © CARTO',
         maxZoom: 20,
-      }).addTo(map.current);
+      }).addTo(map);
 
+      mapRef.current = map;
       console.log('Map initialized successfully');
 
-      // Trigger map resize
+      // Force map to recalculate size
       setTimeout(() => {
-        if (map.current) {
-          map.current.invalidateSize();
-          console.log('Map size invalidated');
-        }
+        map.invalidateSize();
+        console.log('Map size invalidated');
       }, 100);
     } catch (error) {
-      console.error('Error initializing map:', error);
+      console.error('Failed to initialize map:', error);
     }
 
     return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
       }
     };
   }, []);
 
-  // Load route and setup animation
+  // Load route
   useEffect(() => {
-    if (!route || !map.current) return;
+    if (!route || !mapRef.current) {
+      console.log('No route or map available');
+      return;
+    }
 
     console.log('Loading route with', route.coordinates.length, 'coordinates');
 
-    // Remove existing polyline and markers
-    if (routePolyline.current) {
-      routePolyline.current.remove();
-      routePolyline.current = null;
-    }
-    if (truckMarker.current) {
-      truckMarker.current.remove();
-      truckMarker.current = null;
+    // Clear existing polyline
+    if (polylineRef.current) {
+      polylineRef.current.remove();
     }
 
     const coords = route.coordinates as [number, number][];
@@ -109,131 +84,119 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
       return;
     }
 
-    try {
-      // Draw route polyline
-      routePolyline.current = L.polyline(coords, {
-        color: '#00d9ff',
-        weight: 3,
-        opacity: 0.8,
-        lineCap: 'round',
-        lineJoin: 'round',
-      }).addTo(map.current);
+    // Draw polyline
+    const polyline = L.polyline(coords, {
+      color: '#00d9ff',
+      weight: 3,
+      opacity: 0.8,
+    }).addTo(mapRef.current);
 
-      console.log('Route polyline added');
+    polylineRef.current = polyline;
 
-      // Fit map to route bounds
-      const bounds = L.latLngBounds(coords);
-      map.current.fitBounds(bounds, { padding: [50, 50] });
+    // Fit bounds
+    const bounds = L.latLngBounds(coords);
+    mapRef.current.fitBounds(bounds, { padding: [50, 50] });
 
-      console.log('Map fitted to bounds');
+    console.log('Route loaded and bounds fitted');
+  }, [route]);
 
-      // Invalidate size to ensure proper rendering
-      setTimeout(() => {
-        if (map.current) {
-          map.current.invalidateSize();
-          console.log('Map size re-invalidated after route load');
+  // Animation loop
+  useEffect(() => {
+    if (!isPlaying || !route) return;
+
+    const coords = route.coordinates as [number, number][];
+    if (coords.length === 0) return;
+
+    const animate = () => {
+      setCurrentIndex((prev) => {
+        const next = prev + Math.max(1, Math.floor(speed));
+        if (next >= coords.length) {
+          setIsPlaying(false);
+          return coords.length - 1;
         }
-      }, 100);
-
-      // Create coordinates for animator
-      const animCoords: RouteCoordinate[] = coords.map((coord, idx) => ({
-        lat: coord[0],
-        lon: coord[1],
-        edgeKey: idx,
-      }));
-
-      // Create animator
-      animator.current = new RouteAnimator(animCoords, speed);
-
-      animator.current.setOnProgressUpdate((state) => {
-        setAnimationState(state);
-
-        // Update truck marker
-        if (!truckMarker.current) {
-          const truckIcon = L.divIcon({
-            html: `<div style="width: 30px; height: 30px; background: #00d9ff; border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px #00d9ff;"><div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div></div>`,
-            iconSize: [30, 30],
-            iconAnchor: [15, 15],
-            className: 'truck-marker',
-          });
-          truckMarker.current = L.marker([state.truckLat, state.truckLon], {
-            icon: truckIcon,
-            zIndexOffset: 1000,
-          }).addTo(map.current!);
-        } else {
-          truckMarker.current.setLatLng([state.truckLat, state.truckLon]);
-        }
+        return next;
       });
 
-      console.log('Animator created and configured');
-    } catch (error) {
-      console.error('Error loading route:', error);
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isPlaying, route, speed]);
+
+  // Update truck marker
+  useEffect(() => {
+    if (!route || !mapRef.current) return;
+
+    const coords = route.coordinates as [number, number][];
+    if (coords.length === 0 || currentIndex >= coords.length) return;
+
+    const [lat, lon] = coords[currentIndex];
+
+    if (!markerRef.current) {
+      const icon = L.divIcon({
+        html: `<div style="width: 24px; height: 24px; background: #00d9ff; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 8px #00d9ff;"></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+      markerRef.current = L.marker([lat, lon], { icon }).addTo(mapRef.current);
+    } else {
+      markerRef.current.setLatLng([lat, lon]);
     }
-  }, [route, speed]);
 
-  const handlePlay = () => {
-    animator.current?.play();
-  };
+    setProgress(currentIndex / coords.length);
+  }, [currentIndex, route]);
 
-  const handlePause = () => {
-    animator.current?.pause();
-  };
-
+  const handlePlay = () => setIsPlaying(true);
+  const handlePause = () => setIsPlaying(false);
   const handleReset = () => {
-    animator.current?.reset();
-    setAnimationState(null);
-
-    if (truckMarker.current) {
-      truckMarker.current.remove();
-      truckMarker.current = null;
-    }
-  };
-
-  const handleSpeedChange = (value: number[]) => {
-    const newSpeed = value[0];
-    setSpeed(newSpeed);
-    animator.current?.setSpeed(newSpeed);
+    setCurrentIndex(0);
+    setProgress(0);
+    setIsPlaying(false);
   };
 
   if (!route) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-background/50 rounded-lg border border-border/30">
-        <p className="text-muted-foreground">Upload OSM file and generate route to animate</p>
+      <div className="w-full h-full flex items-center justify-center bg-background/50 border border-border/30 rounded">
+        <p className="text-muted-foreground">Upload OSM file and generate route</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-background rounded-lg border border-border/30 overflow-hidden">
-      {/* Map Container - CRITICAL: ref must have explicit dimensions */}
+    <div className="w-full h-full flex flex-col bg-background border border-border/30 rounded overflow-hidden">
+      {/* Map Container */}
       <div
-        ref={mapContainer}
+        ref={containerRef}
         className="flex-1 w-full bg-background"
         style={{
           width: '100%',
           height: '100%',
-          minHeight: '0',
-          minWidth: '0',
         }}
       />
 
-      {/* Controls Panel */}
-      <div className="bg-card/90 border-t border-border/30 p-4 space-y-3 flex-shrink-0">
-        {/* Progress Bar */}
+      {/* Controls */}
+      <div className="bg-card/90 border-t border-border/30 p-3 space-y-2 flex-shrink-0">
+        {/* Progress */}
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Progress</span>
-            <span>{animationState ? `${(animationState.progress * 100).toFixed(1)}%` : '0%'}</span>
+            <span>{Math.round(progress * 100)}%</span>
           </div>
-          <div className="w-full bg-background/50 rounded-full h-2">
+          <div className="w-full bg-background/50 rounded h-2">
             <div
-              className="bg-primary h-2 rounded-full transition-all"
-              style={{ width: `${(animationState?.progress || 0) * 100}%` }}
+              className="bg-primary h-2 rounded transition-all"
+              style={{ width: `${progress * 100}%` }}
             />
           </div>
         </div>
 
-        {/* Speed Control */}
+        {/* Speed */}
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Speed</span>
@@ -241,32 +204,20 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
           </div>
           <Slider
             value={[speed]}
-            onValueChange={handleSpeedChange}
+            onValueChange={(v) => setSpeed(v[0])}
             min={0.1}
             max={5}
             step={0.1}
-            className="w-full"
           />
         </div>
 
-        {/* Playback Buttons */}
+        {/* Buttons */}
         <div className="flex gap-2">
-          <Button
-            onClick={handlePlay}
-            disabled={animationState?.isPlaying}
-            size="sm"
-            className="flex-1"
-          >
+          <Button onClick={handlePlay} disabled={isPlaying} size="sm" className="flex-1">
             <Play className="w-3 h-3 mr-1" />
             Play
           </Button>
-          <Button
-            onClick={handlePause}
-            disabled={!animationState?.isPlaying}
-            variant="outline"
-            size="sm"
-            className="flex-1"
-          >
+          <Button onClick={handlePause} disabled={!isPlaying} variant="outline" size="sm" className="flex-1">
             <Pause className="w-3 h-3 mr-1" />
             Pause
           </Button>
@@ -275,26 +226,6 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
             Reset
           </Button>
         </div>
-
-        {/* Stats */}
-        {animationState && (
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div className="bg-background/50 rounded p-2">
-              <p className="text-muted-foreground">Completed</p>
-              <p className="font-display text-primary">{animationState.completedEdges.size}</p>
-            </div>
-            <div className="bg-background/50 rounded p-2">
-              <p className="text-muted-foreground">Total</p>
-              <p className="font-display text-foreground">{route.stats.totalTraversals}</p>
-            </div>
-            <div className="bg-background/50 rounded p-2">
-              <p className="text-muted-foreground">Remaining</p>
-              <p className="font-display text-amber-400">
-                {route.stats.totalTraversals - animationState.completedEdges.size}
-              </p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
