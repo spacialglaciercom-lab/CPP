@@ -1,7 +1,7 @@
 /**
  * Animated Leaflet Map Component
  * Displays route with animated truck and playback controls
- * Design: Command Center Interface with proper layout
+ * CRITICAL: Uses explicit width/height styling to fix invisible map issues
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -41,23 +41,43 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
 
-    map.current = L.map(mapContainer.current, {
-      center: [45.5017, -73.5673],
-      zoom: 13,
-      zoomControl: true,
-      attributionControl: true,
+    // CRITICAL: Set explicit dimensions on container
+    mapContainer.current.style.width = '100%';
+    mapContainer.current.style.height = '100%';
+
+    console.log('Initializing map container:', {
+      width: mapContainer.current.style.width,
+      height: mapContainer.current.style.height,
+      offsetWidth: mapContainer.current.offsetWidth,
+      offsetHeight: mapContainer.current.offsetHeight,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap contributors © CARTO',
-      subdomains: 'abcd',
-      maxZoom: 20,
-    }).addTo(map.current);
+    try {
+      map.current = L.map(mapContainer.current, {
+        center: [45.5017, -73.5673],
+        zoom: 13,
+        zoomControl: true,
+        attributionControl: true,
+      });
 
-    // Trigger map resize after initialization
-    setTimeout(() => {
-      map.current?.invalidateSize();
-    }, 100);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap contributors © CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20,
+      }).addTo(map.current);
+
+      console.log('Map initialized successfully');
+
+      // Trigger map resize
+      setTimeout(() => {
+        if (map.current) {
+          map.current.invalidateSize();
+          console.log('Map size invalidated');
+        }
+      }, 100);
+    } catch (error) {
+      console.error('Error initializing map:', error);
+    }
 
     return () => {
       if (map.current) {
@@ -71,6 +91,8 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   useEffect(() => {
     if (!route || !map.current) return;
 
+    console.log('Loading route with', route.coordinates.length, 'coordinates');
+
     // Remove existing polyline and markers
     if (routePolyline.current) {
       routePolyline.current.remove();
@@ -82,55 +104,71 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
     }
 
     const coords = route.coordinates as [number, number][];
-    if (coords.length === 0) return;
+    if (coords.length === 0) {
+      console.warn('No coordinates in route');
+      return;
+    }
 
-    // Draw route polyline
-    routePolyline.current = L.polyline(coords, {
-      color: '#00d9ff',
-      weight: 3,
-      opacity: 0.8,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(map.current);
+    try {
+      // Draw route polyline
+      routePolyline.current = L.polyline(coords, {
+        color: '#00d9ff',
+        weight: 3,
+        opacity: 0.8,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(map.current);
 
-    // Fit map to route bounds
-    const bounds = L.latLngBounds(coords);
-    map.current.fitBounds(bounds, { padding: [50, 50] });
+      console.log('Route polyline added');
 
-    // Invalidate size to ensure proper rendering
-    setTimeout(() => {
-      map.current?.invalidateSize();
-    }, 100);
+      // Fit map to route bounds
+      const bounds = L.latLngBounds(coords);
+      map.current.fitBounds(bounds, { padding: [50, 50] });
 
-    // Create coordinates for animator
-    const animCoords: RouteCoordinate[] = coords.map((coord, idx) => ({
-      lat: coord[0],
-      lon: coord[1],
-      edgeKey: idx,
-    }));
+      console.log('Map fitted to bounds');
 
-    // Create animator
-    animator.current = new RouteAnimator(animCoords, speed);
+      // Invalidate size to ensure proper rendering
+      setTimeout(() => {
+        if (map.current) {
+          map.current.invalidateSize();
+          console.log('Map size re-invalidated after route load');
+        }
+      }, 100);
 
-    animator.current.setOnProgressUpdate((state) => {
-      setAnimationState(state);
+      // Create coordinates for animator
+      const animCoords: RouteCoordinate[] = coords.map((coord, idx) => ({
+        lat: coord[0],
+        lon: coord[1],
+        edgeKey: idx,
+      }));
 
-      // Update truck marker
-      if (!truckMarker.current) {
-        const truckIcon = L.divIcon({
-          html: `<div style="width: 30px; height: 30px; background: #00d9ff; border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px #00d9ff;"><div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div></div>`,
-          iconSize: [30, 30],
-          iconAnchor: [15, 15],
-          className: 'truck-marker',
-        });
-        truckMarker.current = L.marker([state.truckLat, state.truckLon], {
-          icon: truckIcon,
-          zIndexOffset: 1000,
-        }).addTo(map.current!);
-      } else {
-        truckMarker.current.setLatLng([state.truckLat, state.truckLon]);
-      }
-    });
+      // Create animator
+      animator.current = new RouteAnimator(animCoords, speed);
+
+      animator.current.setOnProgressUpdate((state) => {
+        setAnimationState(state);
+
+        // Update truck marker
+        if (!truckMarker.current) {
+          const truckIcon = L.divIcon({
+            html: `<div style="width: 30px; height: 30px; background: #00d9ff; border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px #00d9ff;"><div style="width: 8px; height: 8px; background: white; border-radius: 50%;"></div></div>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+            className: 'truck-marker',
+          });
+          truckMarker.current = L.marker([state.truckLat, state.truckLon], {
+            icon: truckIcon,
+            zIndexOffset: 1000,
+          }).addTo(map.current!);
+        } else {
+          truckMarker.current.setLatLng([state.truckLat, state.truckLon]);
+        }
+      });
+
+      console.log('Animator created and configured');
+    } catch (error) {
+      console.error('Error loading route:', error);
+    }
   }, [route, speed]);
 
   const handlePlay = () => {
@@ -167,8 +205,17 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
 
   return (
     <div className="w-full h-full flex flex-col bg-background rounded-lg border border-border/30 overflow-hidden">
-      {/* Map Container */}
-      <div ref={mapContainer} className="flex-1 w-full bg-background" style={{ minHeight: '0' }} />
+      {/* Map Container - CRITICAL: ref must have explicit dimensions */}
+      <div
+        ref={mapContainer}
+        className="flex-1 w-full bg-background"
+        style={{
+          width: '100%',
+          height: '100%',
+          minHeight: '0',
+          minWidth: '0',
+        }}
+      />
 
       {/* Controls Panel */}
       <div className="bg-card/90 border-t border-border/30 p-4 space-y-3 flex-shrink-0">
