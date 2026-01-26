@@ -1,8 +1,8 @@
 /**
  * Trash Collection Route Planner - Home Page
- * Design: Command Center Interface
+ * Design: Command Center Interface - Mobile Optimized
  * - Dark theme with electric cyan accents
- * - Three-column layout: sidebar | map | data panel
+ * - Responsive layout: stacked on mobile, three-column on desktop
  * - Terminal-style processing logs
  */
 
@@ -16,6 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Upload,
@@ -34,6 +35,8 @@ import {
   AlertCircle,
   Info,
   Loader2,
+  Menu,
+  X,
 } from "lucide-react";
 import {
   processRoute,
@@ -44,15 +47,12 @@ import {
 } from "@/lib/routeProcessor";
 import { useTurnPenalties } from "@/contexts/TurnPenaltiesContext";
 import { detectUTurns, UTurnDetectionResult } from "@/lib/uTurnDetector";
-import RouteMap from "@/components/RouteMap";
-import LeafletMap from "@/components/LeafletMap";
 import AnimatedLeafletMap from "@/components/AnimatedLeafletMap";
 import TurnPenaltiesConfig from "@/components/TurnPenaltiesConfig";
 import UTurnDetectionPanel from "@/components/UTurnDetectionPanel";
 import ConsolePanel from "@/components/ConsolePanel";
 
 export default function Home() {
-  // Get turn penalties from context
   const { penalties } = useTurnPenalties();
 
   // File state
@@ -73,11 +73,13 @@ export default function Home() {
   const [logs, setLogs] = useState<ProcessingLog[]>([]);
   const [result, setResult] = useState<RouteResult | null>(null);
   const [uTurnDetection, setUTurnDetection] = useState<UTurnDetectionResult | null>(null);
-  const [showUTurnAnalysis, setShowUTurnAnalysis] = useState(false);
+
+  // Mobile state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("map");
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logs
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
@@ -90,7 +92,7 @@ export default function Home() {
           !selectedFile.name.endsWith(".xml") &&
           !selectedFile.name.endsWith(".osm")
         ) {
-          toast.error("Please select an OSM XML file (.xml or .osm)");
+          toast.error("Please select an OSM XML file");
           return;
         }
 
@@ -100,11 +102,8 @@ export default function Home() {
 
         const reader = new FileReader();
         reader.onload = (e) => {
-          setFileContent(e.target?.result as string);
-          toast.success(`File loaded: ${selectedFile.name}`);
-        };
-        reader.onerror = () => {
-          toast.error("Failed to read file");
+          const content = e.target?.result as string;
+          setFileContent(content);
         };
         reader.readAsText(selectedFile);
       }
@@ -112,34 +111,25 @@ export default function Home() {
     []
   );
 
-  const handleDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    const droppedFile = event.dataTransfer.files[0];
-    if (droppedFile) {
-      if (
-        !droppedFile.name.endsWith(".xml") &&
-        !droppedFile.name.endsWith(".osm")
-      ) {
-        toast.error("Please drop an OSM XML file (.xml or .osm)");
-        return;
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const droppedFile = e.dataTransfer.files[0];
+      if (droppedFile) {
+        const event = {
+          target: { files: [droppedFile] },
+        } as unknown as React.ChangeEvent<HTMLInputElement>;
+        handleFileSelect(event);
       }
+    },
+    [handleFileSelect]
+  );
 
-      setFile(droppedFile);
-      setResult(null);
-      setLogs([]);
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setFileContent(e.target?.result as string);
-        toast.success(`File loaded: ${droppedFile.name}`);
-      };
-      reader.readAsText(droppedFile);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-  }, []);
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   const handleGenerate = useCallback(async () => {
     if (!fileContent) {
@@ -147,62 +137,53 @@ export default function Home() {
       return;
     }
 
-    // Validate custom start point if enabled
-    let customStart: StartPoint | null = null;
-    if (useCustomStart) {
-      const lat = parseFloat(startLat);
-      const lon = parseFloat(startLon);
-      if (isNaN(lat) || isNaN(lon)) {
-        toast.error("Please enter valid coordinates for the starting point");
-        return;
-      }
-      if (lat < -90 || lat > 90) {
-        toast.error("Latitude must be between -90 and 90");
-        return;
-      }
-      if (lon < -180 || lon > 180) {
-        toast.error("Longitude must be between -180 and 180");
-        return;
-      }
-      customStart = { lat, lon };
-    }
-
     setIsProcessing(true);
     setProgress(0);
     setLogs([]);
-    setResult(null);
 
     try {
+      const startPoint: StartPoint | undefined = useCustomStart
+        ? { lat: parseFloat(startLat), lon: parseFloat(startLon) }
+        : undefined;
+
+      const penaltyConfig: TurnPenaltyConfig = {
+        straight: penalties.straight,
+        rightTurn: penalties.rightTurn,
+        leftTurn: penalties.leftTurn,
+        uTurn: penalties.uTurn,
+      };
+
       const result = await processRoute(
         fileContent,
         filename,
         ignoreOneways,
-        (log) => {
+        (log: ProcessingLog) => {
           setLogs((prev) => [...prev, log]);
-          setProgress((prev) => Math.min(prev + 8, 95));
+          setProgress((prev) => Math.min(prev + 5, 95));
         },
-        customStart,
-        penalties as TurnPenaltyConfig
+        startPoint,
+        penaltyConfig
       );
 
-      setProgress(100);
       setResult(result);
-      
-      // Run U-turn detection
+      setProgress(100);
+      setLogs((prev) => [
+        ...prev,
+        {
+          timestamp: new Date(),
+          message: "Route generation complete!",
+          type: "success",
+        },
+      ]);
+
       try {
         const uTurnResult = detectUTurns(fileContent);
         setUTurnDetection(uTurnResult);
-        if (uTurnResult.totalCount > 0) {
-          setShowUTurnAnalysis(true);
-          toast.success(`Route generated! Found ${uTurnResult.totalCount} U-turn features.`);
-        } else {
-          toast.success("Route generated successfully!");
-        }
       } catch (uTurnError) {
-        // U-turn detection is optional, don't fail the whole process
         console.warn("U-turn detection failed:", uTurnError);
-        toast.success("Route generated successfully!");
       }
+
+      toast.success("Route generated successfully!");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown error occurred";
@@ -218,7 +199,7 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
-  }, [fileContent, filename, ignoreOneways, useCustomStart, startLat, startLon]);
+  }, [fileContent, filename, ignoreOneways, useCustomStart, startLat, startLon, penalties]);
 
   const handleDownload = useCallback(() => {
     if (!result) return;
@@ -268,55 +249,68 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <ConsolePanel />
+
       {/* Header */}
       <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="flex items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary/20 border border-primary/50 flex items-center justify-center glow-cyan">
-              <Truck className="w-5 h-5 text-primary" />
+        <div className="flex items-center justify-between px-4 lg:px-6 py-3">
+          <div className="flex items-center gap-2 lg:gap-3">
+            <div className="w-8 lg:w-10 h-8 lg:h-10 rounded-lg bg-primary/20 border border-primary/50 flex items-center justify-center">
+              <Truck className="w-4 lg:w-5 h-4 lg:h-5 text-primary" />
             </div>
-            <div>
-              <h1 className="font-display text-lg font-semibold text-foreground">
-                Trash Collection Route Planner
+            <div className="hidden sm:block">
+              <h1 className="font-display text-sm lg:text-lg font-semibold text-foreground">
+                Trash Route Planner
               </h1>
-              <p className="text-xs text-muted-foreground font-mono">
-                Chinese Postman Problem Solver
+              <p className="text-xs text-muted-foreground font-mono hidden md:block">
+                Chinese Postman Solver
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 lg:gap-4">
             <Badge
               variant="outline"
               className="border-primary/50 text-primary font-mono text-xs"
             >
               <span className="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse" />
-              SYSTEM READY
+              READY
             </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="lg:hidden"
+            >
+              {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </Button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <div className="flex flex-1 h-[calc(100vh-57px)] overflow-hidden">
-        {/* Left Sidebar - Controls */}
-        <aside className="w-80 border-r border-border/50 bg-sidebar flex flex-col overflow-hidden">
-          <ScrollArea className="flex-1 overflow-hidden">
-            <div className="p-4 space-y-4">
+      <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
+        {/* Sidebar - Mobile Drawer / Desktop Sidebar */}
+        <aside
+          className={`${
+            sidebarOpen ? "block" : "hidden"
+          } lg:block w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-border/50 bg-sidebar overflow-hidden`}
+        >
+          <ScrollArea className="h-full">
+            <div className="p-3 lg:p-4 space-y-3 lg:space-y-4">
               {/* File Upload */}
               <Card className="border-border/50 bg-card/50">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-display flex items-center gap-2">
-                    <Upload className="w-4 h-4 text-primary" />
-                    OSM File Input
+                <CardHeader className="pb-2 lg:pb-3">
+                  <CardTitle className="text-xs lg:text-sm font-display flex items-center gap-2">
+                    <Upload className="w-3 lg:w-4 h-3 lg:h-4 text-primary" />
+                    OSM File
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div
-                    className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${
+                    className={`border-2 border-dashed rounded-lg p-3 text-center transition-colors cursor-pointer text-xs lg:text-sm ${
                       file
                         ? "border-primary/50 bg-primary/5"
-                        : "border-border hover:border-primary/30 hover:bg-primary/5"
+                        : "border-border hover:border-primary/30"
                     }`}
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
@@ -331,8 +325,8 @@ export default function Home() {
                     />
                     {file ? (
                       <div className="space-y-1">
-                        <FileText className="w-8 h-8 mx-auto text-primary" />
-                        <p className="text-sm font-medium text-foreground truncate">
+                        <FileText className="w-6 lg:w-8 h-6 lg:h-8 mx-auto text-primary" />
+                        <p className="font-medium text-foreground truncate">
                           {file.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
@@ -341,366 +335,263 @@ export default function Home() {
                       </div>
                     ) : (
                       <div className="space-y-1">
-                        <Upload className="w-8 h-8 mx-auto text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">
-                          Drop OSM file or click to browse
-                        </p>
-                        <p className="text-xs text-muted-foreground/70">
-                          .xml or .osm format
-                        </p>
+                        <Upload className="w-6 lg:w-8 h-6 lg:h-8 mx-auto text-muted-foreground" />
+                        <p className="text-muted-foreground">Drop or click</p>
+                        <p className="text-xs text-muted-foreground/70">.xml or .osm</p>
                       </div>
                     )}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Configuration */}
+              {/* Route Configuration */}
               <Card className="border-border/50 bg-card/50">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-display flex items-center gap-2">
-                    <Route className="w-4 h-4 text-primary" />
-                    Route Configuration
+                <CardHeader className="pb-2 lg:pb-3">
+                  <CardTitle className="text-xs lg:text-sm font-display flex items-center gap-2">
+                    <Route className="w-3 lg:w-4 h-3 lg:h-4 text-primary" />
+                    Configuration
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Output filename */}
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="filename"
-                      className="text-xs text-muted-foreground"
-                    >
-                      Output Filename
-                    </Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="filename"
-                        value={filename}
-                        onChange={(e) => setFilename(e.target.value)}
-                        placeholder="trash_route"
-                        className="font-mono text-sm bg-input/50 border-border/50"
-                      />
-                      <span className="text-xs text-muted-foreground">.gpx</span>
-                    </div>
+                <CardContent className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs lg:text-sm">Filename</Label>
+                    <Input
+                      value={filename}
+                      onChange={(e) => setFilename(e.target.value)}
+                      placeholder="trash_route"
+                      className="h-8 text-xs lg:text-sm"
+                    />
                   </div>
 
-                  {/* One-way handling */}
                   <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-xs text-muted-foreground">
-                        Ignore One-Ways
-                      </Label>
-                      <p className="text-[10px] text-muted-foreground/70">
-                        Collect both sides of one-way streets
-                      </p>
-                    </div>
+                    <Label className="text-xs lg:text-sm">Ignore One-Ways</Label>
                     <Switch
                       checked={ignoreOneways}
                       onCheckedChange={setIgnoreOneways}
                     />
                   </div>
 
-                  <Separator className="bg-border/30" />
+                  <Separator className="my-2" />
 
-                  {/* Custom Start Point */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Crosshair className="w-3 h-3" />
-                          Custom Start Point
-                        </Label>
-                        <p className="text-[10px] text-muted-foreground/70">
-                          Use specific coordinates
-                        </p>
-                      </div>
-                      <Switch
-                        checked={useCustomStart}
-                        onCheckedChange={setUseCustomStart}
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs lg:text-sm">Custom Start</Label>
+                    <Switch
+                      checked={useCustomStart}
+                      onCheckedChange={setUseCustomStart}
+                    />
+                  </div>
+
+                  {useCustomStart && (
+                    <div className="space-y-2">
+                      <Input
+                        type="number"
+                        placeholder="Latitude"
+                        value={startLat}
+                        onChange={(e) => setStartLat(e.target.value)}
+                        step="0.0001"
+                        className="h-8 text-xs lg:text-sm"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Longitude"
+                        value={startLon}
+                        onChange={(e) => setStartLon(e.target.value)}
+                        step="0.0001"
+                        className="h-8 text-xs lg:text-sm"
                       />
                     </div>
-
-                    {useCustomStart && (
-                      <div className="space-y-2 pl-1 border-l-2 border-primary/30">
-                        <div className="space-y-1.5 pl-3">
-                          <Label
-                            htmlFor="startLat"
-                            className="text-xs text-muted-foreground"
-                          >
-                            Latitude
-                          </Label>
-                          <Input
-                            id="startLat"
-                            type="number"
-                            step="any"
-                            value={startLat}
-                            onChange={(e) => setStartLat(e.target.value)}
-                            placeholder="e.g., 45.5171"
-                            className="font-mono text-sm bg-input/50 border-border/50"
-                          />
-                        </div>
-                        <div className="space-y-1.5 pl-3">
-                          <Label
-                            htmlFor="startLon"
-                            className="text-xs text-muted-foreground"
-                          >
-                            Longitude
-                          </Label>
-                          <Input
-                            id="startLon"
-                            type="number"
-                            step="any"
-                            value={startLon}
-                            onChange={(e) => setStartLon(e.target.value)}
-                            placeholder="e.g., -73.6070"
-                            className="font-mono text-sm bg-input/50 border-border/50"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </CardContent>
               </Card>
 
-              {/* Turn Penalties Configuration */}
+              {/* Turn Penalties */}
               <TurnPenaltiesConfig />
 
               {/* Actions */}
-              <div className="space-y-2">
+              <div className="space-y-2 pt-2">
                 <Button
                   onClick={handleGenerate}
-                  disabled={!fileContent || isProcessing}
-                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-display glow-cyan"
+                  disabled={!file || isProcessing}
+                  className="w-full h-9 text-xs lg:text-sm"
                 >
                   {isProcessing ? (
                     <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Processing...
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      Generating...
                     </>
                   ) : (
                     <>
-                      <Route className="w-4 h-4 mr-2" />
+                      <Route className="w-3 h-3 mr-1" />
                       Generate Route
                     </>
                   )}
                 </Button>
 
                 {result && (
-                  <Button
-                    onClick={handleDownload}
-                    variant="outline"
-                    className="w-full border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Download GPX
-                  </Button>
+                  <>
+                    <Button
+                      onClick={handleDownload}
+                      variant="outline"
+                      className="w-full h-9 text-xs lg:text-sm"
+                    >
+                      <Download className="w-3 h-3 mr-1" />
+                      Download GPX
+                    </Button>
+                    <Button
+                      onClick={handleReset}
+                      variant="outline"
+                      className="w-full h-9 text-xs lg:text-sm"
+                    >
+                      <RotateCcw className="w-3 h-3 mr-1" />
+                      Reset
+                    </Button>
+                  </>
                 )}
-
-                <Button
-                  onClick={handleReset}
-                  variant="ghost"
-                  className="w-full text-muted-foreground hover:text-foreground"
-                >
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
               </div>
             </div>
           </ScrollArea>
         </aside>
 
-        {/* Center - Map */}
-        <main className="flex-1 relative overflow-hidden">
-          {isProcessing && (
-            <div className="absolute top-4 left-4 right-4 z-10">
-              <Progress value={progress} className="h-1" />
-            </div>
-          )}
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Tabs for Mobile */}
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="flex-1 flex flex-col lg:hidden"
+          >
+            <TabsList className="w-full rounded-none border-b border-border/30">
+              <TabsTrigger value="map" className="flex-1 text-xs">
+                Map
+              </TabsTrigger>
+              <TabsTrigger value="stats" className="flex-1 text-xs">
+                Stats
+              </TabsTrigger>
+              <TabsTrigger value="logs" className="flex-1 text-xs">
+                Logs
+              </TabsTrigger>
+            </TabsList>
 
-          <AnimatedLeafletMap
-            route={result || null}
-          />
+            {/* Map Tab */}
+            <TabsContent value="map" className="flex-1 overflow-hidden m-0">
+              <AnimatedLeafletMap route={result} />
+            </TabsContent>
 
-          {!result && !isProcessing && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center space-y-2 opacity-50">
-                <MapPin className="w-16 h-16 mx-auto text-muted-foreground" />
-                <p className="text-muted-foreground font-display">
-                  Upload an OSM file to visualize the route
+            {/* Stats Tab */}
+            <TabsContent value="stats" className="flex-1 overflow-auto m-0 p-3">
+              {result ? (
+                <div className="space-y-3">
+                  <Card className="border-border/50 bg-card/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs lg:text-sm">Route Stats</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-xs lg:text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Distance:</span>
+                        <span className="font-mono">{result.stats.totalDistanceKm.toFixed(2)} km</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Time:</span>
+                        <span className="font-mono">{result.stats.driveTimeMin} min</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Traversals:</span>
+                        <span className="font-mono">{result.stats.totalTraversals}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                      {uTurnDetection && (
+                    <UTurnDetectionPanel result={uTurnDetection} />
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground text-center py-8">
+                  Generate a route to see statistics
                 </p>
-              </div>
-            </div>
-          )}
-        </main>
-
-        {/* Right Panel - Stats & Logs */}
-        <aside className="w-96 border-l border-border/50 bg-sidebar flex flex-col">
-          {/* Stats */}
-          {result && (
-            <div className="p-4 border-b border-border/50">
-              <h3 className="text-sm font-display text-foreground mb-3 flex items-center gap-2">
-                <GitBranch className="w-4 h-4 text-primary" />
-                Route Statistics
-              </h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-card/50 rounded-lg p-3 border border-border/30">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Ruler className="w-3 h-3" />
-                    <span className="text-[10px] uppercase tracking-wider">
-                      Distance
-                    </span>
-                  </div>
-                  <p className="font-mono text-lg text-foreground">
-                    {result.stats.totalDistanceKm.toFixed(2)}{" "}
-                    <span className="text-xs text-muted-foreground">km</span>
-                  </p>
-                </div>
-                <div className="bg-card/50 rounded-lg p-3 border border-border/30">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Clock className="w-3 h-3" />
-                    <span className="text-[10px] uppercase tracking-wider">
-                      Est. Time
-                    </span>
-                  </div>
-                  <p className="font-mono text-lg text-foreground">
-                    {result.stats.driveTimeMin.toFixed(0)}{" "}
-                    <span className="text-xs text-muted-foreground">min</span>
-                  </p>
-                </div>
-                <div className="bg-card/50 rounded-lg p-3 border border-border/30">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Route className="w-3 h-3" />
-                    <span className="text-[10px] uppercase tracking-wider">
-                      Traversals
-                    </span>
-                  </div>
-                  <p className="font-mono text-lg text-foreground">
-                    {result.stats.totalTraversals.toLocaleString()}
-                  </p>
-                </div>
-                <div className="bg-card/50 rounded-lg p-3 border border-border/30">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <MapPin className="w-3 h-3" />
-                    <span className="text-[10px] uppercase tracking-wider">
-                      Waypoints
-                    </span>
-                  </div>
-                  <p className="font-mono text-lg text-foreground">
-                    {result.coordinates.length.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                <div className="text-xs">
-                  <p className="text-muted-foreground">Nodes</p>
-                  <p className="font-mono text-foreground">
-                    {result.stats.nodeCount}
-                  </p>
-                </div>
-                <div className="text-xs">
-                  <p className="text-muted-foreground">Edges</p>
-                  <p className="font-mono text-foreground">
-                    {result.stats.edgeCount}
-                  </p>
-                </div>
-                <div className="text-xs">
-                  <p className="text-muted-foreground">Components</p>
-                  <p className="font-mono text-foreground">
-                    {result.stats.connectedComponents}
-                  </p>
-                </div>
-              </div>
-
-              {/* Turn Statistics */}
-              <div className="mt-4 pt-3 border-t border-border/30">
-                <p className="text-xs text-muted-foreground mb-2">Turn Statistics</p>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/30">
-                    <p className="text-[10px] text-emerald-400 uppercase">Right</p>
-                    <p className="font-mono text-lg text-emerald-400">
-                      {result.stats.rightTurnCount}
-                    </p>
-                  </div>
-                  <div className="bg-amber-500/10 rounded-lg p-2 border border-amber-500/30">
-                    <p className="text-[10px] text-amber-400 uppercase">Left</p>
-                    <p className="font-mono text-lg text-amber-400">
-                      {result.stats.leftTurnCount}
-                    </p>
-                  </div>
-                  <div className={`rounded-lg p-2 border ${
-                    result.stats.uTurnCount === 0 
-                      ? 'bg-emerald-500/10 border-emerald-500/30' 
-                      : 'bg-red-500/10 border-red-500/30'
-                  }`}>
-                    <p className={`text-[10px] uppercase ${
-                      result.stats.uTurnCount === 0 ? 'text-emerald-400' : 'text-red-400'
-                    }`}>U-Turns</p>
-                    <p className={`font-mono text-lg ${
-                      result.stats.uTurnCount === 0 ? 'text-emerald-400' : 'text-red-400'
-                    }`}>
-                      {result.stats.uTurnCount}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* U-Turn Detection Results */}
-          {uTurnDetection && showUTurnAnalysis && (
-            <div className="px-4 py-3 border-b border-border/50">
-              <UTurnDetectionPanel result={uTurnDetection} />
-            </div>
-          )}
-
-          {/* Processing Logs */}
-          <div className="flex-1 flex flex-col min-h-0">
-            <div className="px-4 py-3 border-b border-border/50 flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-display text-foreground">
-                Processing Log
-              </h3>
-              {isProcessing && (
-                <Loader2 className="w-3 h-3 ml-auto animate-spin text-primary" />
               )}
-            </div>
-            <ScrollArea className="flex-1">
-              <div className="p-3 space-y-1 font-mono text-xs">
-                {logs.length === 0 ? (
-                  <p className="text-muted-foreground/50 text-center py-8">
-                    Awaiting input...
-                  </p>
-                ) : (
-                  logs.map((log, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-2 py-1 px-2 rounded hover:bg-muted/30"
-                    >
-                      {getLogIcon(log.type)}
-                      <span className="text-muted-foreground/70">
-                        [{log.timestamp.toLocaleTimeString()}]
-                      </span>
-                      <span
-                        className={
-                          log.type === "error"
-                            ? "text-red-400"
-                            : log.type === "success"
-                            ? "text-emerald-400"
-                            : log.type === "warning"
-                            ? "text-amber-400"
-                            : "text-foreground/80"
-                        }
-                      >
-                        {log.message}
-                      </span>
-                    </div>
-                  ))
-                )}
+            </TabsContent>
+
+            {/* Logs Tab */}
+            <TabsContent value="logs" className="flex-1 overflow-auto m-0 p-3">
+              <div className="space-y-1 text-xs font-mono">
+                {logs.map((log, idx) => (
+                  <div key={idx} className="flex gap-2 items-start">
+                    {getLogIcon(log.type)}
+                    <span className="text-muted-foreground flex-1">{log.message}</span>
+                  </div>
+                ))}
                 <div ref={logsEndRef} />
               </div>
-            </ScrollArea>
+            </TabsContent>
+          </Tabs>
+
+          {/* Desktop Layout */}
+          <div className="hidden lg:flex flex-1 overflow-hidden gap-4 p-4">
+            {/* Map */}
+            <div className="flex-1 min-w-0">
+              <AnimatedLeafletMap route={result} />
+            </div>
+
+            {/* Right Panel - Stats */}
+            <div className="w-96 border border-border/30 rounded bg-card/50 flex flex-col overflow-hidden">
+              <ScrollArea className="flex-1">
+                <div className="p-4 space-y-4">
+                  {result ? (
+                    <>
+                      {/* Route Statistics */}
+                      <Card className="border-border/50 bg-background/50">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <Route className="w-4 h-4 text-primary" />
+                            Route Statistics
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground">Distance</p>
+                              <p className="font-mono text-sm font-semibold text-primary">
+                                {result.stats.totalDistanceKm.toFixed(2)} km
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground">Est. Time</p>
+                              <p className="font-mono text-sm font-semibold text-primary">
+                                {result.stats.driveTimeMin} min
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground">Traversals</p>
+                              <p className="font-mono text-sm font-semibold">
+                                {result.stats.totalTraversals}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground">Waypoints</p>
+                              <p className="font-mono text-sm font-semibold">
+                                {result.coordinates.length}
+                              </p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* U-Turn Detection */}
+                      {uTurnDetection && (
+                        <UTurnDetectionPanel result={uTurnDetection} />
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground text-center py-8">
+                      Generate a route to see statistics
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
           </div>
-        </aside>
+        </div>
       </div>
     </div>
   );
