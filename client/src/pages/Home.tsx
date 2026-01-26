@@ -473,8 +473,10 @@ export default function Home() {
             </TabsList>
 
             {/* Map Tab */}
-            <TabsContent value="map" className="flex-1 overflow-hidden m-0">
-              <AnimatedLeafletMap route={result} />
+            <TabsContent value="map" className="flex-1 overflow-hidden m-0 p-0 h-full">
+              <div className="w-full h-full">
+                <AnimatedLeafletMap route={result} />
+              </div>
             </TabsContent>
 
             {/* Stats Tab */}

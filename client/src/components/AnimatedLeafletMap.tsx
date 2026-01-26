@@ -169,14 +169,15 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-background border border-border/30 rounded overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-background border border-border/30 rounded overflow-hidden min-h-0">
       {/* Map Container */}
       <div
         ref={containerRef}
-        className="flex-1 w-full bg-background"
+        className="flex-1 w-full bg-background min-h-0"
         style={{
           width: '100%',
           height: '100%',
+          minHeight: 0,
         }}
       />
 
