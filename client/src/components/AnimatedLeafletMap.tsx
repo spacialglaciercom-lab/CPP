@@ -9,7 +9,8 @@ import 'leaflet/dist/leaflet.css';
 import { RouteResult } from '@/lib/routeProcessor';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Play, Pause, RotateCcw } from 'lucide-react';
+import { Play, Pause, RotateCcw, Map as MapIcon } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface AnimatedLeafletMapProps {
   route: RouteResult | null;
@@ -25,6 +26,8 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   const [progress, setProgress] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [mapStyle, setMapStyle] = useState<'standard' | 'dark'>('dark');
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   // Initialize map
   useEffect(() => {
@@ -39,10 +42,16 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
         zoomControl: true,
       });
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      const tileUrl = mapStyle === 'dark' 
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/positron/{z}/{x}/{y}{r}.png';
+      
+      const tileLayer = L.tileLayer(tileUrl, {
         attribution: '© OpenStreetMap © CARTO',
         maxZoom: 20,
       }).addTo(map);
+      
+      tileLayerRef.current = tileLayer;
 
       mapRef.current = map;
       console.log('Map initialized successfully');
@@ -62,7 +71,7 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
         mapRef.current = null;
       }
     };
-  }, []);
+  }, [mapStyle]);
 
   // Load route
   useEffect(() => {
@@ -160,6 +169,23 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
     setIsPlaying(false);
   };
 
+  const handleMapStyleChange = (style: 'standard' | 'dark') => {
+    setMapStyle(style);
+    if (mapRef.current && tileLayerRef.current) {
+      mapRef.current.removeLayer(tileLayerRef.current);
+      const tileUrl = style === 'dark' 
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/positron/{z}/{x}/{y}{r}.png';
+      
+      const newTileLayer = L.tileLayer(tileUrl, {
+        attribution: '© OpenStreetMap © CARTO',
+        maxZoom: 20,
+      }).addTo(mapRef.current);
+      
+      tileLayerRef.current = newTileLayer;
+    }
+  };
+
   if (!route) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-background/50 border border-border/30 rounded">
@@ -183,6 +209,20 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
 
       {/* Controls */}
       <div className="bg-card/90 border-t border-border/30 p-3 space-y-2 flex-shrink-0">
+        {/* Map Style Selector */}
+        <div className="flex items-center gap-2">
+          <MapIcon className="w-4 h-4 text-muted-foreground" />
+          <Select value={mapStyle} onValueChange={(v) => handleMapStyleChange(v as 'standard' | 'dark')}>
+            <SelectTrigger className="w-full h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="dark">Dark Map</SelectItem>
+              <SelectItem value="standard">Standard Map</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         {/* Progress */}
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-muted-foreground">
