@@ -40,6 +40,8 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
         center: [45.5, -73.6],
         zoom: 13,
         zoomControl: true,
+        touchZoom: true,
+        preferCanvas: true,
       });
 
       const tileUrl = mapStyle === 'dark' 
@@ -61,6 +63,11 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
         map.invalidateSize();
         console.log('Map size invalidated');
       }, 100);
+
+      // Enable touch support
+      map.on('touchstart', () => {
+        console.log('Touch detected on map');
+      });
     } catch (error) {
       console.error('Failed to initialize map:', error);
     }
@@ -71,7 +78,7 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
         mapRef.current = null;
       }
     };
-  }, [mapStyle]);
+  }, []);
 
   // Load route
   useEffect(() => {
@@ -169,6 +176,39 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
     setIsPlaying(false);
   };
 
+  // Update tile layer when map style changes
+  useEffect(() => {
+    if (!mapRef.current || !tileLayerRef.current) return;
+    
+    mapRef.current.removeLayer(tileLayerRef.current);
+    const tileUrl = mapStyle === 'dark' 
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/positron/{z}/{x}/{y}{r}.png';
+    
+    const newTileLayer = L.tileLayer(tileUrl, {
+      attribution: '© OpenStreetMap © CARTO',
+      maxZoom: 20,
+    }).addTo(mapRef.current);
+    
+    tileLayerRef.current = newTileLayer;
+  }, [mapStyle]);
+
+  // Prevent scroll on mobile when interacting with map
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      // Allow Leaflet to handle touch events
+      e.preventDefault();
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+    };
+  }, []);
+
   const handleMapStyleChange = (style: 'standard' | 'dark') => {
     setMapStyle(style);
     if (mapRef.current && tileLayerRef.current) {
@@ -195,7 +235,7 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-background border border-border/30 rounded overflow-hidden min-h-0">
+    <div className="w-full h-full flex flex-col bg-background border border-border/30 rounded overflow-hidden min-h-0" style={{ height: '100%' }}>
       {/* Map Container */}
       <div
         ref={containerRef}
@@ -204,6 +244,8 @@ export default function AnimatedLeafletMap({ route }: AnimatedLeafletMapProps) {
           width: '100%',
           height: '100%',
           minHeight: 0,
+          flex: 1,
+          touchAction: 'none',
         }}
       />
 

@@ -453,12 +453,12 @@ export default function Home() {
         </aside>
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {/* Tabs for Mobile */}
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
-            className="flex-1 flex flex-col lg:hidden"
+            className="flex-1 flex flex-col lg:hidden min-h-0"
           >
             <TabsList className="w-full rounded-none border-b border-border/30">
               <TabsTrigger value="map" className="flex-1 text-xs">
@@ -473,8 +473,8 @@ export default function Home() {
             </TabsList>
 
             {/* Map Tab */}
-            <TabsContent value="map" className="flex-1 overflow-hidden m-0 p-0 h-full">
-              <div className="w-full h-full">
+            <TabsContent value="map" className="flex-1 overflow-hidden m-0 p-0 min-h-0">
+              <div className="w-full h-full flex flex-col" style={{ height: '100%', minHeight: 0 }}>
                 <AnimatedLeafletMap route={result} />
               </div>
             </TabsContent>
