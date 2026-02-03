@@ -51,32 +51,42 @@ export interface ProcessingLog {
 }
 
 export interface RouteResult {
+  coordinates: Array<[number, number]>;
   gpxContent: string;
   stats: RouteStats;
-  logs: ProcessingLog[];
-  coordinates: Array<[number, number]>;
-  edgeSequence?: number[];
-  bounds: {
-    minLat: number;
-    maxLat: number;
-    minLon: number;
-    maxLon: number;
-  };
 }
 
-// Highway types to include
+export interface TurnPenaltyConfig {
+  straight: number;
+  rightTurn: number;
+  leftTurn: number;
+  uTurn: number;
+}
+
+// Highway types to INCLUDE (trash collection eligible)
 const INCLUDE_HIGHWAYS = new Set([
-  'residential', 'unclassified', 'service', 'tertiary', 
-  'secondary', 'primary', 'living_street'
+  'residential',
+  'unclassified',
+  'service',
+  'tertiary',
+  'secondary'
 ]);
 
-// Exclusions
+// Service types to EXCLUDE
 const EXCLUDE_SERVICE = new Set(['parking_aisle', 'driveway']);
+
+// Access types to EXCLUDE
 const EXCLUDE_ACCESS = new Set(['private', 'no']);
+
+// Highway types to EXCLUDE
 const EXCLUDE_HIGHWAYS = new Set([
-  'footway', 'cycleway', 'steps', 'path', 'pedestrian', 'track'
+  'parking_aisle',
+  'private',
+  'footway',
+  'cycleway',
+  'steps',
+  'path'
 ]);
-const EXCLUDE_DRIVEWAYS = new Set(['driveway']); // Additional driveway exclusion
 
 function createLog(message: string, type: ProcessingLog['type'] = 'info'): ProcessingLog {
   return { timestamp: new Date(), message, type };
@@ -160,31 +170,34 @@ export function filterWays(ways: OSMWay[]): { included: OSMWay[]; excluded: OSMW
     const service = way.tags.service || '';
     const access = way.tags.access || '';
     
-    // EXPLICIT DRIVEWAY EXCLUSION - Check multiple tags first
+    // STEP 1: Check exclusion criteria first
+    // Exclude by service type (parking_aisle, driveway)
     if (EXCLUDE_SERVICE.has(service)) {
       excluded.push(way);
       continue;
     }
     
-    if (EXCLUDE_DRIVEWAYS.has(highway)) {
-      excluded.push(way);
-      continue;
-    }
-    
+    // Exclude by access type (private, no)
     if (EXCLUDE_ACCESS.has(access)) {
       excluded.push(way);
       continue;
     }
     
-    // Check if it's a driveable highway
-    if (!INCLUDE_HIGHWAYS.has(highway)) {
-      if (EXCLUDE_HIGHWAYS.has(highway) || highway === '') {
-        excluded.push(way);
-        continue;
-      }
+    // Exclude by highway type (parking_aisle, private, footway, cycleway, steps, path)
+    if (EXCLUDE_HIGHWAYS.has(highway)) {
+      excluded.push(way);
+      continue;
     }
-
-    included.push(way);
+    
+    // STEP 2: Check if highway is in the INCLUDE list
+    // Only include: residential, unclassified, service, tertiary, secondary
+    if (INCLUDE_HIGHWAYS.has(highway)) {
+      included.push(way);
+      continue;
+    }
+    
+    // If highway is not in include list and not explicitly excluded, exclude it
+    excluded.push(way);
   }
 
   return { included, excluded };
@@ -196,7 +209,7 @@ interface Graph {
   edgeCount: number;
 }
 
-export function buildGraph(
+function buildGraph(
   nodes: Map<number, OSMNode>, 
   ways: OSMWay[], 
   ignoreOneways: boolean
@@ -302,8 +315,7 @@ function findLargestSCC(graph: Graph): { subgraph: Graph; componentCount: number
     }
   }
 
-  while (finished.length > 0) {
-    const node = finished.pop()!;
+  for (const node of finished.reverse()) {
     if (!visited.has(node)) {
       const component = new Set<number>();
       dfs2(node, component);
@@ -312,194 +324,216 @@ function findLargestSCC(graph: Graph): { subgraph: Graph; componentCount: number
   }
 
   // Find largest component
-  const largestComponent = components.reduce((a, b) => a.size > b.size ? a : b, new Set<number>());
-
-  // Build subgraph
-  const subAdjacency = new Map<number, Array<{ to: number; key: number; data: GraphEdge }>>();
-  const subNodes = new Map<number, OSMNode>();
-  let edgeCount = 0;
-
-  const largestComponentArray = Array.from(largestComponent);
-  for (const nodeId of largestComponentArray) {
-    const node = graph.nodes.get(nodeId);
-    if (node) subNodes.set(nodeId, node);
-
-    const edges = graph.adjacency.get(nodeId) || [];
-    const filteredEdges = edges.filter(e => largestComponent.has(e.to));
-    if (filteredEdges.length > 0) {
-      subAdjacency.set(nodeId, filteredEdges);
-      edgeCount += filteredEdges.length;
+  let largestComponent = components[0] || new Set();
+  for (const component of components) {
+    if (component.size > largestComponent.size) {
+      largestComponent = component;
     }
   }
 
+  // Build subgraph
+  const subgraphAdj = new Map<number, Array<{ to: number; key: number; data: GraphEdge }>>();
+  let edgeCount = 0;
+  for (const [from, edges] of graph.adjacency.entries()) {
+    if (largestComponent.has(from)) {
+      const filteredEdges = edges.filter(e => largestComponent.has(e.to));
+      if (filteredEdges.length > 0) {
+        subgraphAdj.set(from, filteredEdges);
+        edgeCount += filteredEdges.length;
+      }
+    }
+  }
+
+  const subgraphNodes = new Map<number, OSMNode>();
+  for (const node of largestComponent) {
+    const n = graph.nodes.get(node);
+    if (n) subgraphNodes.set(node, n);
+  }
+
   return {
-    subgraph: { adjacency: subAdjacency, nodes: subNodes, edgeCount },
+    subgraph: { adjacency: subgraphAdj, nodes: subgraphNodes, edgeCount },
     componentCount: components.length
   };
 }
 
-function findClosestNode(graph: Graph, targetLat: number, targetLon: number): number {
-  let minDist = Infinity;
-  let closestNode: number = Array.from(graph.nodes.keys())[0];
+function getOddDegreeNodes(graph: Graph): number[] {
+  const degrees = new Map<number, number>();
 
-  const nodeEntries = Array.from(graph.nodes.entries());
-  for (const [id, node] of nodeEntries) {
-    const dist = haversineDistance(targetLat, targetLon, node.lat, node.lon);
-    if (dist < minDist) {
-      minDist = dist;
-      closestNode = id;
+  for (const [node, edges] of graph.adjacency.entries()) {
+    degrees.set(node, (degrees.get(node) || 0) + edges.length);
+  }
+
+  for (const node of graph.nodes.keys()) {
+    if (!degrees.has(node)) {
+      degrees.set(node, 0);
     }
   }
 
-  return closestNode;
+  return Array.from(degrees.entries())
+    .filter(([_, degree]) => degree % 2 === 1)
+    .map(([node, _]) => node);
 }
 
-function findCentroidNode(graph: Graph): number {
-  let sumLat = 0, sumLon = 0, count = 0;
+function dijkstra(
+  graph: Graph,
+  start: number,
+  end: number
+): { path: number[]; distance: number } {
+  const distances = new Map<number, number>();
+  const previous = new Map<number, number>();
+  const unvisited = new Set(graph.nodes.keys());
 
-  const nodeValues = Array.from(graph.nodes.values());
-  for (const node of nodeValues) {
-    sumLat += node.lat;
-    sumLon += node.lon;
-    count++;
+  for (const node of graph.nodes.keys()) {
+    distances.set(node, Infinity);
   }
+  distances.set(start, 0);
 
-  const centroidLat = sumLat / count;
-  const centroidLon = sumLon / count;
+  while (unvisited.size > 0) {
+    let current = -1;
+    let minDistance = Infinity;
 
-  let minDist = Infinity;
-  let closestNode: number = Array.from(graph.nodes.keys())[0];
+    for (const node of unvisited) {
+      const dist = distances.get(node) || Infinity;
+      if (dist < minDistance) {
+        minDistance = dist;
+        current = node;
+      }
+    }
 
-  const nodeEntries = Array.from(graph.nodes.entries());
-  for (const [id, node] of nodeEntries) {
-    const dist = haversineDistance(centroidLat, centroidLon, node.lat, node.lon);
-    if (dist < minDist) {
-      minDist = dist;
-      closestNode = id;
+    if (current === -1 || current === end) break;
+    unvisited.delete(current);
+
+    const edges = graph.adjacency.get(current) || [];
+    for (const edge of edges) {
+      if (unvisited.has(edge.to)) {
+        const newDist = (distances.get(current) || Infinity) + edge.data.length;
+        if (newDist < (distances.get(edge.to) || Infinity)) {
+          distances.set(edge.to, newDist);
+          previous.set(edge.to, current);
+        }
+      }
     }
   }
 
-  return closestNode;
+  const path: number[] = [];
+  let current = end;
+  while (previous.has(current)) {
+    path.unshift(current);
+    current = previous.get(current)!;
+  }
+  path.unshift(start);
+
+  return {
+    path,
+    distance: distances.get(end) || Infinity
+  };
 }
 
-export interface TurnPenaltyConfig {
-  straight: number;      // 0-100, default 0
-  rightTurn: number;     // 0-200, default 10
-  leftTurn: number;      // 0-500, default 50
-  uTurn: number;         // 0-1000, default 500
+function minimumWeightMatching(graph: Graph, oddNodes: number[]): Array<[number, number]> {
+  const matching: Array<[number, number]> = [];
+  const matched = new Set<number>();
+
+  for (let i = 0; i < oddNodes.length; i++) {
+    if (matched.has(oddNodes[i])) continue;
+
+    let bestJ = -1;
+    let bestDistance = Infinity;
+
+    for (let j = i + 1; j < oddNodes.length; j++) {
+      if (matched.has(oddNodes[j])) continue;
+
+      const { distance } = dijkstra(graph, oddNodes[i], oddNodes[j]);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestJ = j;
+      }
+    }
+
+    if (bestJ !== -1) {
+      matching.push([oddNodes[i], oddNodes[bestJ]]);
+      matched.add(oddNodes[i]);
+      matched.add(oddNodes[bestJ]);
+    }
+  }
+
+  return matching;
 }
 
-/**
- * Calculate turn score with configurable penalties
- * Lower score = preferred turn
- * 
- * Turn categories:
- * - Straight (0°): score 0 + straightPenalty
- * - Slight right (1-45°): score 20 + rightTurnPenalty
- * - Right (46-90°): score 65 + rightTurnPenalty
- * - Sharp right (91-135°): score 110 + rightTurnPenalty
- * - Slight left (-1 to -45°): score 160 + leftTurnPenalty
- * - Left (-46 to -90°): score 205 + leftTurnPenalty
- * - Sharp left (-91 to -135°): score 250 + leftTurnPenalty
- * - U-turn (±136-180°): score 500+ + uTurnPenalty (heavy penalty)
- */
-function calculateTurnScore(incomingBearing: number, outgoingBearing: number, penalties: TurnPenaltyConfig): number {
-  // Calculate turn angle: positive = right, negative = left
-  let turnAngle = outgoingBearing - incomingBearing;
-  
-  // Normalize to -180 to 180 range
-  while (turnAngle > 180) turnAngle -= 360;
-  while (turnAngle < -180) turnAngle += 360;
-  
-  const absTurn = Math.abs(turnAngle);
-  
-  // U-turn detection: turns greater than 150 degrees get heavy penalty
-  if (absTurn > 150) {
-    // U-turn penalty: base 500 + how close to 180 degrees + configurable penalty
-    return 500 + (absTurn - 150) + penalties.uTurn;
+function createMultigraph(graph: Graph, matching: Array<[number, number]>): Graph {
+  const multigraph = new Map<number, Array<{ to: number; key: number; data: GraphEdge }>>();
+  let edgeKey = 0;
+
+  // Copy original edges
+  for (const [from, edges] of graph.adjacency.entries()) {
+    const edgesCopy = [];
+    for (const edge of edges) {
+      edgesCopy.push({ ...edge, key: edgeKey++ });
+    }
+    multigraph.set(from, edgesCopy);
   }
-  
-  // Prefer going straight or slight turns
-  if (absTurn <= 20) {
-    // Straight ahead: best score + configurable penalty
-    return absTurn + penalties.straight;
+
+  // Add matching edges
+  for (const [u, v] of matching) {
+    const { path } = dijkstra(graph, u, v);
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const from = path[i];
+      const to = path[i + 1];
+
+      const edges = graph.adjacency.get(from) || [];
+      const edge = edges.find(e => e.to === to);
+
+      if (edge) {
+        if (!multigraph.has(from)) multigraph.set(from, []);
+        multigraph.get(from)!.push({
+          to,
+          key: edgeKey++,
+          data: edge.data
+        });
+      }
+    }
   }
-  
-  // Right turns preferred over left turns
-  if (turnAngle > 0) {
-    // Right turn: score based on angle magnitude + configurable penalty
-    return 20 + turnAngle + penalties.rightTurn;
-  } else {
-    // Left turn: add 140 penalty to prefer rights + configurable penalty
-    return 160 + absTurn + penalties.leftTurn;
-  }
+
+  return {
+    adjacency: multigraph,
+    nodes: graph.nodes,
+    edgeCount: edgeKey
+  };
 }
 
-function hierholzerWithTurnPreference(
-  graph: Graph, 
-  startNode: number,
-  penalties: TurnPenaltyConfig
-): number[] {
-  // Create working copy of edges
-  const remainingEdges = new Map<number, Array<{ to: number; key: number; data: GraphEdge }>>();
-  const adjEntries = Array.from(graph.adjacency.entries());
-  for (const [node, edges] of adjEntries) {
-    remainingEdges.set(node, [...edges]);
-  }
-
+function findEulerianCircuit(graph: Graph, startNode: number): number[] {
+  const stack: number[] = [startNode];
   const circuit: number[] = [];
-  const stack: Array<{ node: number; incomingBearing: number | null }> = [
-    { node: startNode, incomingBearing: null }
-  ];
+  const edges = new Map<string, Array<{ to: number; key: number; data: GraphEdge }>>();
+
+  // Deep copy adjacency list
+  for (const [node, edgeList] of graph.adjacency.entries()) {
+    edges.set(node.toString(), [...edgeList]);
+  }
 
   while (stack.length > 0) {
-    const { node, incomingBearing } = stack[stack.length - 1];
-    const edges = remainingEdges.get(node) || [];
+    const current = stack[stack.length - 1];
+    const currentEdges = edges.get(current.toString()) || [];
 
-    if (edges.length > 0) {
-      let selectedEdge: { to: number; key: number; data: GraphEdge };
-
-      if (incomingBearing !== null && edges.length > 1) {
-        // Score each edge by turn preference with configurable penalties
-        const edgesWithScore = edges.map(edge => {
-          const score = calculateTurnScore(incomingBearing, edge.data.bearing, penalties);
-          return { edge, score };
-        });
-        
-        // Sort by score (lower = better)
-        edgesWithScore.sort((a, b) => a.score - b.score);
-        selectedEdge = edgesWithScore[0].edge;
-      } else {
-        // No incoming bearing or only one choice - just take first available
-        selectedEdge = edges[0];
-      }
-
-      // Remove selected edge
-      const idx = edges.findIndex(e => e.key === selectedEdge.key);
-      if (idx !== -1) edges.splice(idx, 1);
-
-      stack.push({ 
-        node: selectedEdge.to, 
-        incomingBearing: selectedEdge.data.bearing 
-      });
+    if (currentEdges.length > 0) {
+      const edge = currentEdges.pop()!;
+      stack.push(edge.to);
     } else {
-      circuit.push(stack.pop()!.node);
+      circuit.push(stack.pop()!);
     }
   }
 
-  circuit.reverse();
-  return circuit;
+  return circuit.reverse();
 }
 
-function generateGPX(
-  circuit: number[], 
-  nodes: Map<number, OSMNode>,
-  filename: string
-): string {
-  const points = circuit
+function getCircuitCoordinates(circuit: number[], nodes: Map<number, OSMNode>): Array<[number, number]> {
+  return circuit
     .map(nodeId => nodes.get(nodeId))
-    .filter((node): node is OSMNode => node !== undefined);
+    .filter((node): node is OSMNode => node !== undefined)
+    .map(node => [node.lat, node.lon] as [number, number]);
+}
 
+function generateGPX(filename: string, points: Array<[number, number]>): string {
   const timestamp = new Date().toISOString();
 
   let gpx = `<?xml version="1.0" encoding="UTF-8"?>
@@ -516,7 +550,7 @@ function generateGPX(
 `;
 
   for (const point of points) {
-    gpx += `      <trkpt lat="${point.lat}" lon="${point.lon}"></trkpt>\n`;
+    gpx += `      <trkpt lat="${point[0]}" lon="${point[1]}"></trkpt>\n`;
   }
 
   gpx += `    </trkseg>
@@ -599,130 +633,97 @@ export interface StartPoint {
   lon: number;
 }
 
+function findNearestNode(graph: Graph, startPoint: StartPoint): number {
+  let nearestNode = -1;
+  let minDistance = Infinity;
+
+  for (const [nodeId, node] of graph.nodes.entries()) {
+    const distance = haversineDistance(startPoint.lat, startPoint.lon, node.lat, node.lon);
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestNode = nodeId;
+    }
+  }
+
+  return nearestNode;
+}
+
 export async function processRoute(
   osmContent: string,
   filename: string,
   ignoreOneways: boolean,
-  onLog: (log: ProcessingLog) => void,
-  customStartPoint?: StartPoint | null,
+  onLog?: (log: ProcessingLog) => void,
+  startPoint?: StartPoint,
   penalties?: TurnPenaltyConfig
 ): Promise<RouteResult> {
-  // Use default penalties if not provided
-  const activePenalties: TurnPenaltyConfig = penalties || {
-    straight: 0,
-    rightTurn: 10,
-    leftTurn: 50,
-    uTurn: 500,
-  };
   const logs: ProcessingLog[] = [];
-  const log = (message: string, type: ProcessingLog['type'] = 'info') => {
-    const entry = createLog(message, type);
-    logs.push(entry);
-    onLog(entry);
-  };
 
-  log('Starting route generation...', 'info');
+  function log(message: string, type: ProcessingLog['type'] = 'info') {
+    const logEntry = createLog(message, type);
+    logs.push(logEntry);
+    onLog?.(logEntry);
+  }
+
   log('Parsing OSM file...', 'info');
-
-  // Parse OSM
   const { nodes, ways } = parseOSMFile(osmContent);
-  log(`Parsed ${nodes.size} nodes and ${ways.length} ways`, 'success');
+  log(`Found ${nodes.size} nodes and ${ways.length} ways`, 'info');
 
-  // Filter ways
-  log('Filtering road segments...', 'info');
+  log('Filtering ways...', 'info');
   const { included, excluded } = filterWays(ways);
-  log(`Included ${included.length} ways, excluded ${excluded.length} ways`, 'info');
+  log(`Included ${included.length} ways, excluded ${excluded.length} ways`, 'success');
 
-  if (included.length === 0) {
-    throw new Error('No valid road segments found in the OSM file');
-  }
+  log('Building graph...', 'info');
+  let graph = buildGraph(nodes, included, ignoreOneways);
+  log(`Graph has ${graph.nodes.size} nodes and ${graph.edgeCount} edges`, 'info');
 
-  // Build graph
-  log('Building road network graph...', 'info');
-  const graph = buildGraph(nodes, included, ignoreOneways);
-  log(`Graph built with ${graph.nodes.size} nodes and ${graph.edgeCount} edges`, 'success');
-
-  // Find largest SCC
-  log('Analyzing network connectivity...', 'info');
+  log('Finding largest connected component...', 'info');
   const { subgraph, componentCount } = findLargestSCC(graph);
-  log(`Found ${componentCount} connected components`, 'info');
-  log(`Largest component: ${subgraph.nodes.size} nodes, ${subgraph.edgeCount} edges`, 'success');
+  log(`Found ${componentCount} components, largest has ${subgraph.nodes.size} nodes`, 'info');
+  graph = subgraph;
 
-  if (subgraph.nodes.size === 0) {
-    throw new Error('No connected road network found');
+  log('Finding odd-degree nodes...', 'info');
+  const oddNodes = getOddDegreeNodes(graph);
+  log(`Found ${oddNodes.length} odd-degree nodes`, 'info');
+
+  log('Computing minimum weight matching...', 'info');
+  const matching = minimumWeightMatching(graph, oddNodes);
+  log(`Computed matching with ${matching.length} pairs`, 'info');
+
+  log('Creating Eulerian multigraph...', 'info');
+  const multigraph = createMultigraph(graph, matching);
+  log(`Multigraph has ${multigraph.edgeCount} edges`, 'info');
+
+  let startNode = Array.from(multigraph.nodes.keys())[0];
+  if (startPoint) {
+    log(`Finding nearest node to start point (${startPoint.lat}, ${startPoint.lon})...`, 'info');
+    startNode = findNearestNode(multigraph, startPoint);
+    const node = multigraph.nodes.get(startNode);
+    if (node) {
+      log(`Starting from node ${startNode} at (${node.lat}, ${node.lon})`, 'success');
+    }
   }
 
-  // Find start node
-  let startNode: number;
-  if (customStartPoint) {
-    log(`Using custom start point: (${customStartPoint.lat.toFixed(6)}, ${customStartPoint.lon.toFixed(6)})`, 'info');
-    startNode = findClosestNode(subgraph, customStartPoint.lat, customStartPoint.lon);
-    const startCoord = subgraph.nodes.get(startNode);
-    if (startCoord) {
-      log(`Nearest graph node: (${startCoord.lat.toFixed(6)}, ${startCoord.lon.toFixed(6)})`, 'success');
-    }
-  } else {
-    log('Calculating route start point (graph centroid)...', 'info');
-    startNode = findCentroidNode(subgraph);
-    const startCoord = subgraph.nodes.get(startNode);
-    if (startCoord) {
-      log(`Start point: (${startCoord.lat.toFixed(6)}, ${startCoord.lon.toFixed(6)})`, 'success');
-    }
-  }
+  log('Finding Eulerian circuit...', 'info');
+  const circuit = findEulerianCircuit(multigraph, startNode);
+  log(`Circuit has ${circuit.length} nodes`, 'success');
 
-  // Find Eulerian circuit
-  log('Computing optimal route using Hierholzer algorithm...', 'info');
-  log('Applying turn penalties for route optimization...', 'info');
-  log(`Turn penalties - Right: ${activePenalties.rightTurn}, Left: ${activePenalties.leftTurn}, U-turn: ${activePenalties.uTurn}`, 'info');
-  const circuit = hierholzerWithTurnPreference(subgraph, startNode, activePenalties);
-  log(`Route computed: ${circuit.length} waypoints`, 'success');
+  log('Generating coordinates...', 'info');
+  const coordinates = getCircuitCoordinates(circuit, multigraph.nodes);
+  log(`Generated ${coordinates.length} coordinate points`, 'success');
 
-  // Generate GPX
   log('Generating GPX file...', 'info');
-  const gpxContent = generateGPX(circuit, subgraph.nodes, filename);
-  log('GPX file generated successfully', 'success');
+  const gpxContent = generateGPX(filename, coordinates);
+  log('GPX file generated', 'success');
 
-  // Calculate stats
-  const stats = calculateRouteStats(
-    circuit, 
-    subgraph, 
-    included.length, 
-    excluded.length, 
-    componentCount
-  );
+  log('Calculating statistics...', 'info');
+  const stats = calculateRouteStats(circuit, multigraph, included.length, excluded.length, componentCount);
+  log('Statistics calculated', 'success');
 
-  log(`Total distance: ${stats.totalDistanceKm.toFixed(2)} km`, 'info');
-  log(`Estimated drive time: ${stats.driveTimeMin.toFixed(1)} minutes (at 15 km/h)`, 'info');
-  log(`Turn statistics: ${stats.rightTurnCount} right, ${stats.leftTurnCount} left, ${stats.uTurnCount} U-turns`, 'info');
-  if (stats.uTurnCount > 0) {
-    log(`Note: ${stats.uTurnCount} U-turns were unavoidable due to network topology`, 'warning');
-  } else {
-    log('No U-turns in the route!', 'success');
-  }
   log('Route generation complete!', 'success');
 
-  // Extract coordinates for map display
-  const coordinates = circuit
-    .map(nodeId => subgraph.nodes.get(nodeId))
-    .filter((node): node is OSMNode => node !== undefined)
-    .map(node => [node.lat, node.lon] as [number, number]);
-
-  // Calculate bounds
-  let minLat = Infinity, maxLat = -Infinity;
-  let minLon = Infinity, maxLon = -Infinity;
-  for (const coord of coordinates) {
-    minLat = Math.min(minLat, coord[0]);
-    maxLat = Math.max(maxLat, coord[0]);
-    minLon = Math.min(minLon, coord[1]);
-    maxLon = Math.max(maxLon, coord[1]);
-  }
-
   return {
-    gpxContent,
-    stats,
-    logs,
     coordinates,
-    edgeSequence: undefined,
-    bounds: { minLat, maxLat, minLon, maxLon }
+    gpxContent,
+    stats
   };
 }
