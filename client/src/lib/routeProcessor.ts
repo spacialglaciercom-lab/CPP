@@ -50,10 +50,31 @@ export interface ProcessingLog {
   type: 'info' | 'success' | 'warning' | 'error';
 }
 
+export interface RoutePoint {
+  nodeId: number;
+  lat: number;
+  lon: number;
+  order: number;
+  timestamp: string;
+  turnType?: 'straight' | 'left' | 'right' | 'u-turn';
+  turnAngle?: number;
+  bearing?: number;
+  distanceFromPrevious?: number;
+}
+
 export interface RouteResult {
   coordinates: Array<[number, number]>;
   gpxContent: string;
   stats: RouteStats;
+  routePoints: RoutePoint[];
+  metadata: {
+    generatedAt: string;
+    totalPoints: number;
+    totalDistance: number;
+    estimatedTime: number;
+    includedHighways: string[];
+    excludedHighways: string[];
+  };
 }
 
 export interface TurnPenaltyConfig {
@@ -533,6 +554,70 @@ function getCircuitCoordinates(circuit: number[], nodes: Map<number, OSMNode>): 
     .map(node => [node.lat, node.lon] as [number, number]);
 }
 
+function createRoutePoints(circuit: number[], nodes: Map<number, OSMNode>): RoutePoint[] {
+  const baseTime = new Date();
+  const routePoints: RoutePoint[] = [];
+  let cumulativeDistance = 0;
+
+  for (let i = 0; i < circuit.length; i++) {
+    const nodeId = circuit[i];
+    const node = nodes.get(nodeId);
+    if (!node) continue;
+
+    const timeOffset = (cumulativeDistance / 15000) * 60 * 1000;
+    const timestamp = new Date(baseTime.getTime() + timeOffset).toISOString();
+
+    let turnType: 'straight' | 'left' | 'right' | 'u-turn' | undefined;
+    let turnAngle: number | undefined;
+    let bearing: number | undefined;
+    let distanceFromPrevious: number | undefined;
+
+    if (i > 0) {
+      const prevNode = nodes.get(circuit[i - 1]);
+      if (prevNode) {
+        distanceFromPrevious = haversineDistance(prevNode.lat, prevNode.lon, node.lat, node.lon);
+        cumulativeDistance += distanceFromPrevious;
+        bearing = calculateBearing(prevNode.lat, prevNode.lon, node.lat, node.lon);
+
+        if (i > 1) {
+          const prevPrevNode = nodes.get(circuit[i - 2]);
+          if (prevPrevNode) {
+            const prevBearing = calculateBearing(prevPrevNode.lat, prevPrevNode.lon, prevNode.lat, prevNode.lon);
+            turnAngle = bearing - prevBearing;
+            while (turnAngle > 180) turnAngle -= 360;
+            while (turnAngle < -180) turnAngle += 360;
+
+            const absTurn = Math.abs(turnAngle);
+            if (absTurn > 150) {
+              turnType = 'u-turn';
+            } else if (turnAngle > 20) {
+              turnType = 'right';
+            } else if (turnAngle < -20) {
+              turnType = 'left';
+            } else {
+              turnType = 'straight';
+            }
+          }
+        }
+      }
+    }
+
+    routePoints.push({
+      nodeId,
+      lat: node.lat,
+      lon: node.lon,
+      order: i,
+      timestamp,
+      turnType,
+      turnAngle,
+      bearing,
+      distanceFromPrevious
+    });
+  }
+
+  return routePoints;
+}
+
 function generateGPX(filename: string, points: Array<[number, number]>): string {
   const timestamp = new Date().toISOString();
 
@@ -719,11 +804,105 @@ export async function processRoute(
   const stats = calculateRouteStats(circuit, multigraph, included.length, excluded.length, componentCount);
   log('Statistics calculated', 'success');
 
+  log('Creating detailed route points...', 'info');
+  const routePoints = createRoutePoints(circuit, multigraph.nodes);
+  log(`Created ${routePoints.length} detailed route points`, 'success');
+
+  const metadata = {
+    generatedAt: new Date().toISOString(),
+    totalPoints: routePoints.length,
+    totalDistance: stats.totalDistanceKm,
+    estimatedTime: stats.driveTimeMin,
+    includedHighways: Array.from(INCLUDE_HIGHWAYS),
+    excludedHighways: Array.from(EXCLUDE_HIGHWAYS)
+  };
+
   log('Route generation complete!', 'success');
 
   return {
     coordinates,
     gpxContent,
-    stats
+    stats,
+    routePoints,
+    metadata
   };
+}
+
+/**
+ * Export route data as comprehensive JSON with all metadata
+ */
+export function exportRouteAsJSON(result: RouteResult): string {
+  const exportData = {
+    metadata: result.metadata,
+    statistics: result.stats,
+    routePoints: result.routePoints,
+    summary: {
+      totalWaypoints: result.routePoints.length,
+      totalDistance: `${result.stats.totalDistanceKm.toFixed(2)} km`,
+      estimatedTime: `${result.stats.driveTimeMin.toFixed(2)} minutes`,
+      turns: {
+        uTurns: result.stats.uTurnCount,
+        rightTurns: result.stats.rightTurnCount,
+        leftTurns: result.stats.leftTurnCount
+      }
+    }
+  };
+
+  return JSON.stringify(exportData, null, 2);
+}
+
+/**
+ * Export route data as comprehensive CSV with all metadata and node details
+ */
+export function exportRouteAsCSV(result: RouteResult): string {
+  let csv = '# ROUTE METADATA\n';
+  csv += `# Generated: ${result.metadata.generatedAt}\n`;
+  csv += `# Total Points: ${result.metadata.totalPoints}\n`;
+  csv += `# Total Distance: ${result.metadata.totalDistance.toFixed(2)} km\n`;
+  csv += `# Estimated Time: ${result.metadata.estimatedTime.toFixed(2)} minutes\n`;
+  csv += `# U-Turns: ${result.stats.uTurnCount}\n`;
+  csv += `# Right Turns: ${result.stats.rightTurnCount}\n`;
+  csv += `# Left Turns: ${result.stats.leftTurnCount}\n`;
+  csv += `# Included Highways: ${result.metadata.includedHighways.join(', ')}\n`;
+  csv += `# Excluded Highways: ${result.metadata.excludedHighways.join(', ')}\n\n`;
+
+  csv += '# ROUTE WAYPOINTS\n';
+  csv += 'Order,NodeID,Latitude,Longitude,Timestamp,TurnType,TurnAngle,Bearing,DistanceFromPrevious(m),CumulativeDistance(m)\n';
+
+  let cumulativeDistance = 0;
+  for (const point of result.routePoints) {
+    if (point.distanceFromPrevious) {
+      cumulativeDistance += point.distanceFromPrevious;
+    }
+
+    const order = point.order;
+    const nodeId = point.nodeId;
+    const lat = point.lat.toFixed(6);
+    const lon = point.lon.toFixed(6);
+    const timestamp = point.timestamp;
+    const turnType = point.turnType || 'N/A';
+    const turnAngle = point.turnAngle !== undefined ? point.turnAngle.toFixed(2) : 'N/A';
+    const bearing = point.bearing !== undefined ? point.bearing.toFixed(2) : 'N/A';
+    const distance = point.distanceFromPrevious !== undefined ? point.distanceFromPrevious.toFixed(2) : 'N/A';
+    const cumDist = cumulativeDistance.toFixed(2);
+
+    csv += `${order},${nodeId},${lat},${lon},"${timestamp}",${turnType},${turnAngle},${bearing},${distance},${cumDist}\n`;
+  }
+
+  return csv;
+}
+
+/**
+ * Download file helper
+ */
+export function downloadFile(content: string, filename: string, mimeType: string): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

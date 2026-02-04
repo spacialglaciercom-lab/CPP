@@ -37,6 +37,8 @@ import {
   Loader2,
   Menu,
   X,
+  FileJson,
+  Sheet,
 } from "lucide-react";
 import {
   processRoute,
@@ -44,6 +46,9 @@ import {
   RouteResult,
   StartPoint,
   TurnPenaltyConfig,
+  exportRouteAsJSON,
+  exportRouteAsCSV,
+  downloadFile,
 } from "@/lib/routeProcessor";
 import { useTurnPenalties } from "@/contexts/TurnPenaltiesContext";
 import { detectUTurns, UTurnDetectionResult } from "@/lib/uTurnDetector";
@@ -215,6 +220,20 @@ export default function Home() {
     URL.revokeObjectURL(url);
 
     toast.success("GPX file downloaded!");
+  }, [result, filename]);
+
+  const handleExportJSON = useCallback(() => {
+    if (!result) return;
+    const jsonContent = exportRouteAsJSON(result);
+    downloadFile(jsonContent, `${filename}_route.json`, "application/json");
+    toast.success("Route data exported as JSON!");
+  }, [result, filename]);
+
+  const handleExportCSV = useCallback(() => {
+    if (!result) return;
+    const csvContent = exportRouteAsCSV(result);
+    downloadFile(csvContent, `${filename}_route.csv`, "text/csv");
+    toast.success("Route data exported as CSV!");
   }, [result, filename]);
 
   const handleReset = useCallback(() => {
@@ -436,6 +455,22 @@ export default function Home() {
                     >
                       <Download className="w-3 h-3 mr-1" />
                       Download GPX
+                    </Button>
+                    <Button
+                      onClick={handleExportJSON}
+                      variant="outline"
+                      className="w-full h-9 text-xs lg:text-sm"
+                    >
+                      <FileJson className="w-3 h-3 mr-1" />
+                      Export JSON
+                    </Button>
+                    <Button
+                      onClick={handleExportCSV}
+                      variant="outline"
+                      className="w-full h-9 text-xs lg:text-sm"
+                    >
+                      <Sheet className="w-3 h-3 mr-1" />
+                      Export CSV
                     </Button>
                     <Button
                       onClick={handleReset}
