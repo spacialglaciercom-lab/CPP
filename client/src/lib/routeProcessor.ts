@@ -183,42 +183,19 @@ export function parseOSMFile(xmlContent: string): { nodes: Map<number, OSMNode>;
 }
 
 export function filterWays(ways: OSMWay[]): { included: OSMWay[]; excluded: OSMWay[] } {
+  // STRICT HIGHWAY RESTRICTION: Only ways with highway tags in the whitelist are included
   const included: OSMWay[] = [];
   const excluded: OSMWay[] = [];
 
   for (const way of ways) {
     const highway = way.tags.highway || '';
-    const service = way.tags.service || '';
-    const access = way.tags.access || '';
     
-    // STEP 1: Check exclusion criteria first
-    // Exclude by service type (parking_aisle, driveway)
-    if (EXCLUDE_SERVICE.has(service)) {
-      excluded.push(way);
-      continue;
-    }
-    
-    // Exclude by access type (private, no)
-    if (EXCLUDE_ACCESS.has(access)) {
-      excluded.push(way);
-      continue;
-    }
-    
-    // Exclude by highway type (parking_aisle, private, footway, cycleway, steps, path)
-    if (EXCLUDE_HIGHWAYS.has(highway)) {
-      excluded.push(way);
-      continue;
-    }
-    
-    // STEP 2: Check if highway is in the INCLUDE list
-    // Only include: residential, unclassified, service, tertiary, secondary
+    // STRICT WHITELIST: Only include ways with highway tag in whitelist
     if (INCLUDE_HIGHWAYS.has(highway)) {
       included.push(way);
-      continue;
+    } else {
+      excluded.push(way);
     }
-    
-    // If highway is not in include list and not explicitly excluded, exclude it
-    excluded.push(way);
   }
 
   return { included, excluded };
