@@ -20,7 +20,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Upload,
-  MapPin,
   Route,
   Download,
   Clock,
@@ -52,7 +51,7 @@ import {
 } from "@/lib/routeProcessor";
 import { useTurnPenalties } from "@/contexts/TurnPenaltiesContext";
 import { detectUTurns, UTurnDetectionResult } from "@/lib/uTurnDetector";
-import AnimatedLeafletMap from "@/components/AnimatedLeafletMap";
+
 import TurnPenaltiesConfig from "@/components/TurnPenaltiesConfig";
 import UTurnDetectionPanel from "@/components/UTurnDetectionPanel";
 import ConsolePanel from "@/components/ConsolePanel";
@@ -81,7 +80,7 @@ export default function Home() {
 
   // Mobile state
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("map");
+  const [activeTab, setActiveTab] = useState("stats");
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -496,9 +495,6 @@ export default function Home() {
             className="flex-1 flex flex-col lg:hidden min-h-0"
           >
             <TabsList className="w-full rounded-none border-b border-border/30">
-              <TabsTrigger value="map" className="flex-1 text-xs">
-                Map
-              </TabsTrigger>
               <TabsTrigger value="stats" className="flex-1 text-xs">
                 Stats
               </TabsTrigger>
@@ -506,13 +502,6 @@ export default function Home() {
                 Logs
               </TabsTrigger>
             </TabsList>
-
-            {/* Map Tab */}
-            <TabsContent value="map" className="flex-1 overflow-hidden m-0 p-0 min-h-0">
-              <div className="w-full h-full flex flex-col" style={{ height: '100%', minHeight: 0 }}>
-                <AnimatedLeafletMap route={result} />
-              </div>
-            </TabsContent>
 
             {/* Stats Tab */}
             <TabsContent value="stats" className="flex-1 overflow-auto m-0 p-3">
@@ -565,13 +554,8 @@ export default function Home() {
 
           {/* Desktop Layout */}
           <div className="hidden lg:flex flex-1 overflow-hidden gap-4 p-4">
-            {/* Map */}
-            <div className="flex-1 min-w-0">
-              <AnimatedLeafletMap route={result} />
-            </div>
-
             {/* Right Panel - Stats */}
-            <div className="w-96 border border-border/30 rounded bg-card/50 flex flex-col overflow-hidden">
+            <div className="flex-1 border border-border/30 rounded bg-card/50 flex flex-col overflow-hidden">
               <ScrollArea className="flex-1">
                 <div className="p-4 space-y-4">
                   {result ? (
