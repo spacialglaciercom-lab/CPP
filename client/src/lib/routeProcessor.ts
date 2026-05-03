@@ -525,10 +525,14 @@ function findEulerianCircuit(graph: Graph, startNode: number): number[] {
 }
 
 function getCircuitCoordinates(circuit: number[], nodes: Map<number, OSMNode>): Array<[number, number]> {
-  return circuit
-    .map(nodeId => nodes.get(nodeId))
-    .filter((node): node is OSMNode => node !== undefined)
-    .map(node => [node.lat, node.lon] as [number, number]);
+  const coordinates: Array<[number, number]> = [];
+  for (const nodeId of circuit) {
+    const node = nodes.get(nodeId);
+    if (node !== undefined) {
+      coordinates.push([node.lat, node.lon]);
+    }
+  }
+  return coordinates;
 }
 
 function createRoutePoints(circuit: number[], nodes: Map<number, OSMNode>): RoutePoint[] {
